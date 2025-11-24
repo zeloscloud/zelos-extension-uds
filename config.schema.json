@@ -38,18 +38,16 @@
             },
             "tx_id": {
               "type": "string",
-              "title": "TX CAN ID (hex)",
+              "title": "TX CAN ID (hex, optional)",
               "description": "CAN ID for outgoing requests (tester->ECU)",
-              "default": "0x7E0",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E0",
               "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
             },
             "rx_id": {
               "type": "string",
-              "title": "RX CAN ID (hex)",
+              "title": "RX CAN ID (hex, optional)",
               "description": "CAN ID for incoming responses (ECU->tester)",
-              "default": "0x7E8",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E8",
               "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
@@ -162,18 +160,16 @@
             },
             "tx_id": {
               "type": "string",
-              "title": "TX CAN ID (hex)",
+              "title": "TX CAN ID (hex, optional)",
               "description": "CAN ID for outgoing requests (tester->ECU)",
-              "default": "0x7E0",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E0",
               "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
             },
             "rx_id": {
               "type": "string",
-              "title": "RX CAN ID (hex)",
+              "title": "RX CAN ID (hex, optional)",
               "description": "CAN ID for incoming responses (ECU->tester)",
-              "default": "0x7E8",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E8",
               "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
@@ -287,18 +283,16 @@
             },
             "tx_id": {
               "type": "string",
-              "title": "TX CAN ID (hex)",
+              "title": "TX CAN ID (hex, optional)",
               "description": "CAN ID for outgoing requests (tester->ECU)",
-              "default": "0x7E0",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E0",
               "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
             },
             "rx_id": {
               "type": "string",
-              "title": "RX CAN ID (hex)",
+              "title": "RX CAN ID (hex, optional)",
               "description": "CAN ID for incoming responses (ECU->tester)",
-              "default": "0x7E8",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E8",
               "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
@@ -412,18 +406,16 @@
             },
             "tx_id": {
               "type": "string",
-              "title": "TX CAN ID (hex)",
+              "title": "TX CAN ID (hex, optional)",
               "description": "CAN ID for outgoing requests (tester->ECU)",
-              "default": "0x7E0",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E0",
               "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
             },
             "rx_id": {
               "type": "string",
-              "title": "RX CAN ID (hex)",
+              "title": "RX CAN ID (hex, optional)",
               "description": "CAN ID for incoming responses (ECU->tester)",
-              "default": "0x7E8",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E8",
               "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
@@ -519,18 +511,16 @@
             },
             "tx_id": {
               "type": "string",
-              "title": "TX CAN ID (hex)",
+              "title": "TX CAN ID (hex, optional)",
               "description": "CAN ID for outgoing requests (tester->ECU)",
-              "default": "0x7E0",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E0",
               "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
             },
             "rx_id": {
               "type": "string",
-              "title": "RX CAN ID (hex)",
+              "title": "RX CAN ID (hex, optional)",
               "description": "CAN ID for incoming responses (ECU->tester)",
-              "default": "0x7E8",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E8",
               "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
