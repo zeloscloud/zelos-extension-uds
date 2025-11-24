@@ -210,78 +210,10 @@ class UDSClient:
 
             self.bus = can.Bus(**bus_kwargs)
 
-            # Configure ISO-TP addressing (optional in global config)
-            # If not specified, will be required per-action
-            tx_id = self.config.get("tx_id")
-            rx_id = self.config.get("rx_id")
-
-            # Only create default connection if both TX/RX IDs are provided in config
-            if tx_id is None or rx_id is None:
-                logger.info("TX/RX IDs not specified in config - will require per-action")
-                # Connection will be created on first action with TX/RX IDs
-                self.running = True
-                logger.info("UDS client started (no default connection)")
-                return
-
-            logger.info(f"UDS addressing: TX=0x{tx_id:03X}, RX=0x{rx_id:03X}")
-
-            # Create ISO-TP addressing
-            tp_addr = isotp.Address(isotp.AddressingMode.Normal_11bits, txid=tx_id, rxid=rx_id)
-
-            # Configure ISO-TP parameters as a dictionary
-            isotp_params = {}
-
-            # Apply user-configured ISO-TP parameters if specified
-            if "isotp_stmin" in self.config:
-                isotp_params["stmin"] = self.config["isotp_stmin"]
-
-            if "isotp_blocksize" in self.config:
-                isotp_params["blocksize"] = self.config["isotp_blocksize"]
-
-            if "isotp_tx_padding" in self.config or "isotp_rx_padding" in self.config:
-                isotp_params["tx_data_length"] = 8  # Full CAN frame
-                if "isotp_tx_padding" in self.config:
-                    isotp_params["tx_padding"] = self.config["isotp_tx_padding"]
-                if "isotp_padding_value" in self.config:
-                    isotp_params["tx_padding_byte"] = self.config["isotp_padding_value"]
-
-            # Create notifier and ISO-TP stack
-            self.notifier = can.Notifier(self.bus, [])
-            self.isotp_stack = isotp.NotifierBasedCanStack(
-                bus=self.bus, notifier=self.notifier, address=tp_addr, params=isotp_params
-            )
-
-            # Create UDS connection wrapper
-            self.connection = PythonIsoTpConnection(self.isotp_stack)
-
-            # Configure UDS client (start with library defaults)
-            config = udsoncan.configs.default_client_config.copy()
-
-            # Configure HexDidCodec as default for all DIDs
-            # This allows reading/writing any DID without pre-defining codecs
-            config["data_identifiers"] = {"default": HexDidCodec}
-            config["input_output"] = {}
-
-            # Only override UDS timeouts if explicitly set by user
-            if "request_timeout" in self.config:
-                config["request_timeout"] = self.config["request_timeout"]
-
-            if "p2_timeout" in self.config:
-                config["p2_timeout"] = self.config["p2_timeout"]
-
-            if "p2_star_timeout" in self.config:
-                config["p2_star_timeout"] = self.config["p2_star_timeout"]
-
-            if "use_external_sniffer" in self.config:
-                config["use_external_sniffer"] = self.config["use_external_sniffer"]
-
-            self.client = Client(self.connection, config=config)
-
-            # Open the connection
-            self.client.open()
-
+            # TX/RX IDs are optional in config - will be specified per-action or use global defaults
+            # Connection will be created on first action
             self.running = True
-            logger.info("UDS client started successfully")
+            logger.info("UDS client started (connection will be created on first action)")
 
         except Exception as e:
             logger.error(f"Failed to start UDS client: {e}")

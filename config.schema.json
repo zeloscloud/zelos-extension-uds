@@ -75,9 +75,7 @@
             }
           },
           "required": [
-            "channel",
-            "tx_id",
-            "rx_id"
+            "channel"
           ],
           "dependencies": {
             "show_advanced": {
@@ -202,9 +200,7 @@
           },
           "required": [
             "channel",
-            "bitrate",
-            "tx_id",
-            "rx_id"
+            "bitrate"
           ],
           "dependencies": {
             "show_advanced": {
@@ -329,9 +325,7 @@
           },
           "required": [
             "channel",
-            "bitrate",
-            "tx_id",
-            "rx_id"
+            "bitrate"
           ],
           "dependencies": {
             "show_advanced": {
@@ -456,9 +450,7 @@
           },
           "required": [
             "channel",
-            "bitrate",
-            "tx_id",
-            "rx_id"
+            "bitrate"
           ],
           "dependencies": {
             "show_advanced": {
@@ -570,9 +562,7 @@
             }
           },
           "required": [
-            "config_json",
-            "tx_id",
-            "rx_id"
+            "config_json"
           ],
           "dependencies": {
             "show_advanced": {
