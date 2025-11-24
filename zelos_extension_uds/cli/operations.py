@@ -9,6 +9,7 @@ from udsoncan.connections import PythonIsoTpConnection
 from udsoncan.exceptions import NegativeResponseException, TimeoutException
 from udsoncan.services import ECUReset, InputOutputControlByIdentifier, RoutineControl
 
+from ..extension import HexDidCodec
 from ..utils import format_hex_id, format_hex_string
 
 logger = logging.getLogger(__name__)
@@ -53,8 +54,14 @@ def create_uds_client(
     # Create ISO-TP connection
     connection = PythonIsoTpConnection(bus, rxid=rx_id, txid=tx_id)
 
+    # Configure UDS client with HexDidCodec as default
+    from udsoncan.configs import default_client_config
+
+    config = default_client_config.copy()
+    config["data_identifiers"] = {"default": HexDidCodec}
+
     # Create UDS client
-    client = Client(connection)
+    client = Client(connection, config=config)
 
     return bus, client
 
@@ -86,10 +93,12 @@ def read_data_by_identifier(
             f"RX: {format_hex_id(rx_id, width=3)})"
         )
 
+        # HexDidCodec is registered as default in client config
         response = client.read_data_by_identifier([did])
 
-        if did in response:
-            data = response[did]
+        # Extract decoded data from response.service_data.values
+        if did in response.service_data.values:
+            data = response.service_data.values[did]
             hex_data = format_hex_string(data)
 
             logger.info(f"Read {len(data)} bytes: {hex_data}")
@@ -149,6 +158,7 @@ def write_data_by_identifier(
             f"with {len(data)} bytes: {format_hex_string(data)}"
         )
 
+        # HexDidCodec is registered as default in client config
         client.write_data_by_identifier(did, data)
 
         logger.info("Write successful")

@@ -1,7 +1,10 @@
 """UDS (Unified Diagnostic Services) over CAN implementation for Zelos."""
 
 import asyncio
+import binascii
 import logging
+import math
+import struct
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -10,6 +13,7 @@ import can
 import isotp
 import udsoncan
 import zelos_sdk
+from udsoncan import DidCodec
 from udsoncan.client import Client
 from udsoncan.connections import PythonIsoTpConnection
 from udsoncan.exceptions import NegativeResponseException, TimeoutException
@@ -24,6 +28,71 @@ from zelos_sdk.actions import action
 from .utils import format_hex_id, format_hex_string, parse_hex_string, validate_hex_id
 
 logger = logging.getLogger(__name__)
+
+
+class HexDidCodec(DidCodec):
+    """Codec to perform simple binary Data Identifier read/writes.
+
+    This codec handles raw bytes without requiring pre-defined DID structures.
+    Adapted from zeloscloud.codecs.uds.codec.HexDidCodec for diagnostic use.
+
+    For diagnostic tools, we preserve byte order (no endianness conversion).
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    @staticmethod
+    def to_bytes(data):
+        """Convert data to bytes.
+
+        Handles multiple data types:
+        - bytes: pass through unchanged
+        - str: hex string '0x1234' -> bytes b'\\x12\\x34' (preserves order)
+        - list: recursively convert each element
+        - float: pack as big-endian float
+        - int: convert to big-endian bytes (network byte order)
+        """
+        logger.debug(f"Converting data={data} ({type(data)}) to bytes")
+        data_bytes = b""
+
+        if isinstance(data, bytes):
+            data_bytes = data
+        elif isinstance(data, str):
+            # '0x1234' -> b'\x12\x34' (preserve byte order)
+            try:
+                data_bytes = bytes(binascii.unhexlify(data.removeprefix("0x")))
+            except binascii.Error:
+                logger.warning(f"Data={data} is not a hex string, encoding as ascii")
+                data_bytes = data.encode("ascii")
+        elif isinstance(data, list):
+            for val in data:
+                data_bytes += HexDidCodec.to_bytes(val)
+        elif isinstance(data, float):
+            data_bytes = struct.pack(">f", data)  # Big-endian float
+        else:
+            # Integer - convert to big-endian bytes (network byte order)
+            min_bytes = int(math.ceil(data.bit_length() / 8))
+            data_bytes = data.to_bytes(length=min_bytes, byteorder="big")
+
+        return data_bytes
+
+    def encode(self, data: Any) -> bytes:
+        """Encode data to bytes for writing to ECU."""
+        return self.to_bytes(data)
+
+    def decode(self, did_payload: bytes) -> bytes:
+        """Decode DID payload from ECU response.
+
+        Returns bytes as-is (preserves order for diagnostic symmetry).
+        """
+        logger.debug(f"Decoding data = {did_payload} ({type(did_payload)})")
+        # Return bytes unchanged
+        return did_payload
+
+    def __len__(self):
+        """Tell udsoncan to read all remaining data after DID."""
+        raise DidCodec.ReadAllRemainingData
 
 
 @dataclass(slots=True)
@@ -157,6 +226,11 @@ class UDSClient:
             # Configure UDS client (start with library defaults)
             config = udsoncan.configs.default_client_config.copy()
 
+            # Configure HexDidCodec as default for all DIDs
+            # This allows reading/writing any DID without pre-defining codecs
+            config["data_identifiers"] = {"default": HexDidCodec}
+            config["input_output"] = {}
+
             # Only override UDS timeouts if explicitly set by user
             if "request_timeout" in self.config:
                 config["request_timeout"] = self.config["request_timeout"]
@@ -171,6 +245,9 @@ class UDSClient:
                 config["use_external_sniffer"] = self.config["use_external_sniffer"]
 
             self.client = Client(self.connection, config=config)
+
+            # Open the connection
+            self.client.open()
 
             self.running = True
             logger.info("UDS client started successfully")
@@ -330,13 +407,11 @@ class UDSClient:
 
         try:
             start_time = time.time()
-            self.metrics.requests_sent += 1
 
             logger.info(f"Changing diagnostic session to: {session_type}")
             self.client.change_session(session_value)
 
             elapsed_ms = (time.time() - start_time) * 1000
-            self.metrics.responses_received += 1
 
             logger.info(f"Session changed successfully in {elapsed_ms:.1f}ms")
 
@@ -347,17 +422,13 @@ class UDSClient:
             }
 
         except NegativeResponseException as e:
-            elapsed_ms = (time.time() - start_time) * 1000
-            self.metrics.errors += 1
             nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
             logger.error(f"Session control NRC: {nrc_name} (0x{e.response.code:02X})")
             return {"error": f"NRC: {nrc_name} (0x{e.response.code:02X})"}
         except TimeoutException:
-            self.metrics.timeouts += 1
             logger.error("Session control timeout")
             return {"error": "Timeout waiting for response"}
         except Exception as e:
-            self.metrics.errors += 1
             logger.error(f"Session control error: {e}")
             return {"error": str(e)}
 
@@ -372,6 +443,8 @@ class UDSClient:
     def read_data_by_identifier(self, did: str) -> dict[str, Any]:
         """Read data from ECU using ReadDataByIdentifier service.
 
+        Uses udsoncan's codec architecture with HexDidCodec for dynamic DID reads.
+
         :param did: Data Identifier as hex string
         :return: Response with data or error
         """
@@ -385,25 +458,20 @@ class UDSClient:
 
         try:
             start_time = time.time()
-            self.metrics.requests_sent += 1
 
-            # Send UDS request
+            # Use udsoncan's standard read_data_by_identifier API
+            # HexDidCodec is registered as default codec in client config
             response = self.client.read_data_by_identifier([did_int])
 
             elapsed = time.time() - start_time
-            self.metrics.responses_received += 1
 
-            # Check for positive response
-            if not response.positive:
-                self.metrics.errors += 1
-                self._log_uds_event(0x22, did_int, None, False, elapsed)
-                return {
-                    "error": f"Negative response: {response.code_name}",
-                    "nrc": response.code,
-                }
+            # Extract decoded data from response using codec
+            # udsoncan returns decoded values in service_data.values dict
+            if did_int in response.service_data.values:
+                data = response.service_data.values[did_int]
+            else:
+                data = b""
 
-            # Extract data
-            data = response.service_data.values[did_int]
             data_hex = format_hex_string(data)
 
             self._log_uds_event(0x22, did_int, data, True, elapsed)
@@ -416,8 +484,14 @@ class UDSClient:
                 "elapsed_ms": round(elapsed * 1000, 2),
             }
 
+        except NegativeResponseException as e:
+            nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
+            logger.error(f"Read DID NRC: {nrc_name} (0x{e.response.code:02X})")
+            return {"error": f"NRC: {nrc_name} (0x{e.response.code:02X})"}
+        except TimeoutException:
+            logger.error("Read DID timeout")
+            return {"error": "Timeout waiting for response"}
         except Exception as e:
-            self.metrics.errors += 1
             logger.error(f"Read DID 0x{did_int:04X} error: {e}")
             return {"error": str(e)}
 
@@ -439,6 +513,8 @@ class UDSClient:
     def write_data_by_identifier(self, did: str, data: str) -> dict[str, Any]:
         """Write data to ECU using WriteDataByIdentifier service.
 
+        Uses udsoncan's codec architecture with HexDidCodec for dynamic DID writes.
+
         :param did: Data Identifier as hex string
         :param data: Data to write as hex string
         :return: Response with status or error
@@ -451,24 +527,22 @@ class UDSClient:
         if isinstance(did_int, dict):
             return did_int
 
-        # Parse data
+        # Parse data - can be hex string or raw bytes
         data_bytes = parse_hex_string(data)
         if isinstance(data_bytes, dict):
             return data_bytes
 
         try:
             start_time = time.time()
-            self.metrics.requests_sent += 1
 
-            # Send UDS request
+            # Use udsoncan's standard write_data_by_identifier API
+            # HexDidCodec is registered as default codec and accepts bytes directly
             response = self.client.write_data_by_identifier(did_int, data_bytes)
 
             elapsed = time.time() - start_time
-            self.metrics.responses_received += 1
 
             # Check for positive response
             if not response.positive:
-                self.metrics.errors += 1
                 self._log_uds_event(0x2E, did_int, data_bytes, False, elapsed)
                 return {
                     "error": f"Negative response: {response.code_name}",
@@ -484,8 +558,14 @@ class UDSClient:
                 "elapsed_ms": round(elapsed * 1000, 2),
             }
 
+        except NegativeResponseException as e:
+            nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
+            logger.error(f"Write DID NRC: {nrc_name} (0x{e.response.code:02X})")
+            return {"error": f"NRC: {nrc_name} (0x{e.response.code:02X})"}
+        except TimeoutException:
+            logger.error("Write DID timeout")
+            return {"error": "Timeout waiting for response"}
         except Exception as e:
-            self.metrics.errors += 1
             logger.error(f"Write DID 0x{did_int:04X} error: {e}")
             return {"error": str(e)}
 
@@ -518,17 +598,14 @@ class UDSClient:
 
         try:
             start_time = time.time()
-            self.metrics.requests_sent += 1
 
             # Send UDS request
             response = self.client.ecu_reset(reset_type_map[reset_type])
 
             elapsed = time.time() - start_time
-            self.metrics.responses_received += 1
 
             # Check for positive response
             if not response.positive:
-                self.metrics.errors += 1
                 self._log_uds_event(0x11, reset_type_map[reset_type], None, False, elapsed)
                 return {
                     "error": f"Negative response: {response.code_name}",
@@ -552,7 +629,6 @@ class UDSClient:
             return result
 
         except Exception as e:
-            self.metrics.errors += 1
             logger.error(f"ECU reset error: {e}")
             return {"error": str(e)}
 
@@ -613,7 +689,6 @@ class UDSClient:
 
         try:
             start_time = time.time()
-            self.metrics.requests_sent += 1
 
             # Send UDS request
             response = self.client.routine_control(
@@ -621,11 +696,9 @@ class UDSClient:
             )
 
             elapsed = time.time() - start_time
-            self.metrics.responses_received += 1
 
             # Check for positive response
             if not response.positive:
-                self.metrics.errors += 1
                 return {
                     "error": f"Negative response: {response.code_name}",
                     "nrc": response.code,
@@ -648,7 +721,6 @@ class UDSClient:
             return result
 
         except Exception as e:
-            self.metrics.errors += 1
             logger.error(f"Routine control error: {e}")
             return {"error": str(e)}
 
@@ -723,7 +795,6 @@ class UDSClient:
 
         try:
             start_time = time.time()
-            self.metrics.requests_sent += 1
 
             # Send UDS request
             response = self.client.io_control(
@@ -733,11 +804,9 @@ class UDSClient:
             )
 
             elapsed = time.time() - start_time
-            self.metrics.responses_received += 1
 
             # Check for positive response
             if not response.positive:
-                self.metrics.errors += 1
                 return {
                     "error": f"Negative response: {response.code_name}",
                     "nrc": response.code,
@@ -751,7 +820,6 @@ class UDSClient:
             }
 
         except Exception as e:
-            self.metrics.errors += 1
             logger.error(f"IO control error: {e}")
             return {"error": str(e)}
 
@@ -774,22 +842,17 @@ class UDSClient:
 
         try:
             start_time = time.time()
-            self.metrics.requests_sent += 1
 
             # Send UDS request
             response = self.client.tester_present(suppress_positive_response=suppress_response)
 
             elapsed = time.time() - start_time
 
-            if response:
-                self.metrics.responses_received += 1
-
-                if not response.positive:
-                    self.metrics.errors += 1
-                    return {
-                        "error": f"Negative response: {response.code_name}",
-                        "nrc": response.code,
-                    }
+            if response and not response.positive:
+                return {
+                    "error": f"Negative response: {response.code_name}",
+                    "nrc": response.code,
+                }
 
             self._log_uds_event(0x3E, 0, None, True, elapsed)
 
@@ -800,7 +863,6 @@ class UDSClient:
             }
 
         except Exception as e:
-            self.metrics.errors += 1
             logger.error(f"Tester present error: {e}")
             return {"error": str(e)}
 
@@ -904,7 +966,6 @@ class UDSClient:
 
         try:
             start_time = time.time()
-            self.metrics.requests_sent += 1
 
             logger.info(f"Reading DTCs with status mask: {status_mask} (0x{mask_value:02X})")
 
@@ -912,7 +973,6 @@ class UDSClient:
             response = self.client.get_dtc_by_status_mask(mask_value)
 
             elapsed_ms = (time.time() - start_time) * 1000
-            self.metrics.responses_received += 1
 
             # Parse DTCs from response
             dtcs = []
@@ -939,17 +999,13 @@ class UDSClient:
             }
 
         except NegativeResponseException as e:
-            elapsed_ms = (time.time() - start_time) * 1000
-            self.metrics.errors += 1
             nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
             logger.error(f"Read DTC NRC: {nrc_name} (0x{e.response.code:02X})")
             return {"error": f"NRC: {nrc_name} (0x{e.response.code:02X})"}
         except TimeoutException:
-            self.metrics.timeouts += 1
             logger.error("Read DTC timeout")
             return {"error": "Timeout waiting for response"}
         except Exception as e:
-            self.metrics.errors += 1
             logger.error(f"Read DTC error: {e}")
             return {"error": str(e)}
 
@@ -972,7 +1028,6 @@ class UDSClient:
 
         try:
             start_time = time.time()
-            self.metrics.requests_sent += 1
 
             # Parse group mask
             group_bytes = parse_hex_string(group)
@@ -988,7 +1043,6 @@ class UDSClient:
             self.client.clear_dtc(group_int)
 
             elapsed_ms = (time.time() - start_time) * 1000
-            self.metrics.responses_received += 1
 
             logger.info("DTCs cleared successfully")
 
@@ -999,17 +1053,13 @@ class UDSClient:
             }
 
         except NegativeResponseException as e:
-            elapsed_ms = (time.time() - start_time) * 1000
-            self.metrics.errors += 1
             nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
             logger.error(f"Clear DTC NRC: {nrc_name} (0x{e.response.code:02X})")
             return {"error": f"NRC: {nrc_name} (0x{e.response.code:02X})"}
         except TimeoutException:
-            self.metrics.timeouts += 1
             logger.error("Clear DTC timeout")
             return {"error": "Timeout waiting for response"}
         except Exception as e:
-            self.metrics.errors += 1
             logger.error(f"Clear DTC error: {e}")
             return {"error": str(e)}
 
@@ -1051,7 +1101,6 @@ class UDSClient:
 
         try:
             start_time = time.time()
-            self.metrics.requests_sent += 1
 
             if not key:
                 # Request seed
@@ -1059,7 +1108,6 @@ class UDSClient:
                 response = self.client.request_seed(base_level)
 
                 elapsed_ms = (time.time() - start_time) * 1000
-                self.metrics.responses_received += 1
 
                 # Extract seed from response
                 seed = (
@@ -1087,7 +1135,6 @@ class UDSClient:
                 response = self.client.send_key(base_level + 1, key_bytes)
 
                 elapsed_ms = (time.time() - start_time) * 1000
-                self.metrics.responses_received += 1
 
                 logger.info("Security access granted")
 
@@ -1100,17 +1147,13 @@ class UDSClient:
                 }
 
         except NegativeResponseException as e:
-            elapsed_ms = (time.time() - start_time) * 1000
-            self.metrics.errors += 1
             nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
             logger.error(f"Security access NRC: {nrc_name} (0x{e.response.code:02X})")
             return {"error": f"NRC: {nrc_name} (0x{e.response.code:02X})"}
         except TimeoutException:
-            self.metrics.timeouts += 1
             logger.error("Security access timeout")
             return {"error": "Timeout waiting for response"}
         except Exception as e:
-            self.metrics.errors += 1
             logger.error(f"Security access error: {e}")
             return {"error": str(e)}
 
