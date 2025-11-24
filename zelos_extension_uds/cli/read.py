@@ -64,7 +64,8 @@ def read(
 
       # Read with custom interface
 
-      zelos-extension-uds read --txid 7E0 --rxid 7E8 --id 1234 --interface pcan --channel PCAN_USBBUS1 --bitrate 500000
+      zelos-extension-uds read --txid 7E0 --rxid 7E8 --id 1234 \\
+        --interface pcan --channel PCAN_USBBUS1 --bitrate 500000
     """
     # Parse hex IDs
     tx_id = validate_hex_id(txid, max_value=0x7FF)

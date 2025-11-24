@@ -4,13 +4,12 @@ import logging
 from typing import Any
 
 import can
-from can.interfaces.socketcan import SocketcanBus
 from udsoncan.client import Client
 from udsoncan.connections import PythonIsoTpConnection
 from udsoncan.exceptions import NegativeResponseException, TimeoutException
 from udsoncan.services import ECUReset, InputOutputControlByIdentifier, RoutineControl
 
-from ..utils import format_hex_id, format_hex_string, parse_hex_string
+from ..utils import format_hex_id, format_hex_string
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +81,9 @@ def read_data_by_identifier(
 
     try:
         logger.info(
-            f"Reading DID {format_hex_id(did, width=4)} (TX: {format_hex_id(tx_id, width=3)}, RX: {format_hex_id(rx_id, width=3)})"
+            f"Reading DID {format_hex_id(did, width=4)} "
+            f"(TX: {format_hex_id(tx_id, width=3)}, "
+            f"RX: {format_hex_id(rx_id, width=3)})"
         )
 
         response = client.read_data_by_identifier([did])
@@ -144,7 +145,8 @@ def write_data_by_identifier(
 
     try:
         logger.info(
-            f"Writing DID {format_hex_id(did, width=4)} with {len(data)} bytes: {format_hex_string(data)}"
+            f"Writing DID {format_hex_id(did, width=4)} "
+            f"with {len(data)} bytes: {format_hex_string(data)}"
         )
 
         client.write_data_by_identifier(did, data)
@@ -335,10 +337,16 @@ def input_output_control(
 
     try:
         control_names = {
-            InputOutputControlByIdentifier.ControlParam.returnControlToECU: "Return Control To ECU",
-            InputOutputControlByIdentifier.ControlParam.resetToDefault: "Reset To Default",
-            InputOutputControlByIdentifier.ControlParam.freezeCurrentState: "Freeze Current State",
-            InputOutputControlByIdentifier.ControlParam.shortTermAdjustment: "Short Term Adjustment",
+            InputOutputControlByIdentifier.ControlParam.returnControlToECU: (
+                "Return Control To ECU"
+            ),
+            InputOutputControlByIdentifier.ControlParam.resetToDefault: ("Reset To Default"),
+            InputOutputControlByIdentifier.ControlParam.freezeCurrentState: (
+                "Freeze Current State"
+            ),
+            InputOutputControlByIdentifier.ControlParam.shortTermAdjustment: (
+                "Short Term Adjustment"
+            ),
         }
 
         control_name = control_names.get(control_param, f"Unknown (0x{control_param:02X})")
@@ -406,7 +414,8 @@ def tester_present(
 
     try:
         logger.info(
-            f"Sending tester present (TX: {format_hex_id(tx_id, width=3)}, suppress response: {suppress_response})"
+            f"Sending tester present (TX: {format_hex_id(tx_id, width=3)}, "
+            f"suppress response: {suppress_response})"
         )
 
         client.tester_present(suppress_positive_response=suppress_response)
@@ -467,9 +476,13 @@ def diagnostic_session_control(
     try:
         session_names = {
             DiagnosticSessionControl.Session.defaultSession: "Default Session",
-            DiagnosticSessionControl.Session.programmingSession: "Programming Session",
-            DiagnosticSessionControl.Session.extendedDiagnosticSession: "Extended Diagnostic Session",
-            DiagnosticSessionControl.Session.safetySystemDiagnosticSession: "Safety System Diagnostic Session",
+            DiagnosticSessionControl.Session.programmingSession: ("Programming Session"),
+            DiagnosticSessionControl.Session.extendedDiagnosticSession: (
+                "Extended Diagnostic Session"
+            ),
+            DiagnosticSessionControl.Session.safetySystemDiagnosticSession: (
+                "Safety System Diagnostic Session"
+            ),
         }
 
         session_name = session_names.get(session_type, f"Unknown (0x{session_type:02X})")
@@ -529,10 +542,12 @@ def read_dtc_information(
 
         # Parse DTCs
         dtcs = []
-        if hasattr(response, 'dtcs') and response.dtcs:
+        if hasattr(response, "dtcs") and response.dtcs:
             for dtc in response.dtcs:
-                dtc_id = f"0x{dtc.id:06X}" if hasattr(dtc, 'id') else "Unknown"
-                status = f"0x{dtc.status.get_byte_as_int():02X}" if hasattr(dtc, 'status') else "Unknown"
+                dtc_id = f"0x{dtc.id:06X}" if hasattr(dtc, "id") else "Unknown"
+                status = (
+                    f"0x{dtc.status.get_byte_as_int():02X}" if hasattr(dtc, "status") else "Unknown"
+                )
                 dtcs.append(f"{dtc_id} (status: {status})")
                 logger.info(f"  DTC: {dtc_id}, Status: {status}")
 
@@ -587,7 +602,11 @@ def security_access_request_seed(
         response = client.request_seed(level)
 
         # Extract seed
-        seed = format_hex_string(response.service_data.seed) if hasattr(response.service_data, 'seed') else ""
+        seed = (
+            format_hex_string(response.service_data.seed)
+            if hasattr(response.service_data, "seed")
+            else ""
+        )
 
         logger.info(f"Received seed: {seed}")
 
@@ -739,7 +758,9 @@ def request_download(
         logger.info(f"Requesting download: address=0x{address:08X}, size={size}")
         response = client.request_download(location)
 
-        max_length = response.service_data.max_length if hasattr(response.service_data, 'max_length') else 0
+        max_length = (
+            response.service_data.max_length if hasattr(response.service_data, "max_length") else 0
+        )
 
         return {
             "status": "success",
@@ -893,11 +914,18 @@ def flash_firmware(
         # Step 2: Security access (if enabled)
         if enable_security:
             if not security_key:
-                return {"status": "error", "error": "Security key required when enable_security is True"}
+                return {
+                    "status": "error",
+                    "error": "Security key required when enable_security is True",
+                }
 
             logger.info(f"Requesting security seed (level {security_level})")
             seed_response = client.request_seed(security_level)
-            seed = seed_response.service_data.seed if hasattr(seed_response.service_data, 'seed') else b''
+            seed = (
+                seed_response.service_data.seed
+                if hasattr(seed_response.service_data, "seed")
+                else b""
+            )
             logger.info(f"Received seed: {format_hex_string(seed)}")
 
             logger.info(f"Sending security key (level {security_level + 1})")
@@ -905,11 +933,17 @@ def flash_firmware(
             logger.info("Security access granted")
 
         # Step 3: Request download
-        location = MemoryLocation(address=base_address, memorysize=len(firmware_data), address_format=32)
+        location = MemoryLocation(
+            address=base_address, memorysize=len(firmware_data), address_format=32
+        )
         logger.info(f"Requesting download: address=0x{base_address:08X}, size={len(firmware_data)}")
         download_response = client.request_download(location)
 
-        max_block_size = download_response.service_data.max_length if hasattr(download_response.service_data, 'max_length') else (block_size or 256)
+        max_block_size = (
+            download_response.service_data.max_length
+            if hasattr(download_response.service_data, "max_length")
+            else (block_size or 256)
+        )
         logger.info(f"Download accepted. Max block size: {max_block_size}")
 
         # Step 4: Transfer data

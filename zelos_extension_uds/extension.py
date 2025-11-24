@@ -11,7 +11,13 @@ import udsoncan
 import zelos_sdk
 from udsoncan.client import Client
 from udsoncan.connections import PythonIsoTpConnection
-from udsoncan.services import *
+from udsoncan.exceptions import NegativeResponseException, TimeoutException
+from udsoncan.services import (
+    DiagnosticSessionControl,
+    ECUReset,
+    InputOutputControlByIdentifier,
+    RoutineControl,
+)
 from zelos_sdk.actions import action
 
 from .utils import format_hex_id, format_hex_string, parse_hex_string, validate_hex_id
@@ -133,7 +139,7 @@ class UDSClient:
                 isotp_params["rx_padding"] = self.config["isotp_rx_padding"]
 
             # Set padding byte value if padding is enabled and explicitly configured
-            if (isotp_params.get("tx_padding") or isotp_params.get("rx_padding")):
+            if isotp_params.get("tx_padding") or isotp_params.get("rx_padding"):
                 isotp_params["tx_data_length"] = 8  # Full CAN frame
                 if "isotp_padding_value" in self.config:
                     isotp_params["tx_padding_byte"] = self.config["isotp_padding_value"]
@@ -220,9 +226,7 @@ class UDSClient:
             # Start periodic tester present if configured
             if self.tester_present_interval > 0:
                 logger.info(f"Starting periodic tester present: {self.tester_present_interval}s")
-                self.tester_present_task = asyncio.create_task(
-                    self._periodic_tester_present()
-                )
+                self.tester_present_task = asyncio.create_task(self._periodic_tester_present())
 
             # Main loop - just keep alive
             while self.running:
@@ -282,7 +286,12 @@ class UDSClient:
         "session_type",
         title="Session Type",
         description="Type of diagnostic session",
-        choices=["Default Session", "Programming Session", "Extended Diagnostic Session", "Safety System Diagnostic Session"],
+        choices=[
+            "Default Session",
+            "Programming Session",
+            "Extended Diagnostic Session",
+            "Safety System Diagnostic Session",
+        ],
         default="Extended Diagnostic Session",
     )
     def diagnostic_session_control(self, session_type: str) -> dict[str, Any]:
@@ -297,9 +306,13 @@ class UDSClient:
         # Map session type to UDS session value
         session_type_map = {
             "Default Session": DiagnosticSessionControl.Session.defaultSession,
-            "Programming Session": DiagnosticSessionControl.Session.programmingSession,
-            "Extended Diagnostic Session": DiagnosticSessionControl.Session.extendedDiagnosticSession,
-            "Safety System Diagnostic Session": DiagnosticSessionControl.Session.safetySystemDiagnosticSession,
+            "Programming Session": (DiagnosticSessionControl.Session.programmingSession),
+            "Extended Diagnostic Session": (
+                DiagnosticSessionControl.Session.extendedDiagnosticSession
+            ),
+            "Safety System Diagnostic Session": (
+                DiagnosticSessionControl.Session.safetySystemDiagnosticSession
+            ),
         }
 
         session_value = session_type_map.get(session_type)
@@ -311,7 +324,7 @@ class UDSClient:
             self.metrics.requests_sent += 1
 
             logger.info(f"Changing diagnostic session to: {session_type}")
-            response = self.client.change_session(session_value)
+            self.client.change_session(session_value)
 
             elapsed_ms = (time.time() - start_time) * 1000
             self.metrics.responses_received += 1
@@ -672,10 +685,16 @@ class UDSClient:
 
         # Map control parameter to UDS control parameter value
         control_param_map = {
-            "Return Control To ECU": InputOutputControlByIdentifier.ControlParam.returnControlToECU,
-            "Reset To Default": InputOutputControlByIdentifier.ControlParam.resetToDefault,
-            "Freeze Current State": InputOutputControlByIdentifier.ControlParam.freezeCurrentState,
-            "Short Term Adjustment": InputOutputControlByIdentifier.ControlParam.shortTermAdjustment,
+            "Return Control To ECU": (
+                InputOutputControlByIdentifier.ControlParam.returnControlToECU
+            ),
+            "Reset To Default": (InputOutputControlByIdentifier.ControlParam.resetToDefault),
+            "Freeze Current State": (
+                InputOutputControlByIdentifier.ControlParam.freezeCurrentState
+            ),
+            "Short Term Adjustment": (
+                InputOutputControlByIdentifier.ControlParam.shortTermAdjustment
+            ),
         }
 
         if control_parameter not in control_param_map:
@@ -888,13 +907,17 @@ class UDSClient:
 
             # Parse DTCs from response
             dtcs = []
-            if hasattr(response, 'dtcs') and response.dtcs:
+            if hasattr(response, "dtcs") and response.dtcs:
                 for dtc in response.dtcs:
-                    dtcs.append({
-                        "id": f"0x{dtc.id:06X}" if hasattr(dtc, 'id') else "Unknown",
-                        "status": f"0x{dtc.status.get_byte_as_int():02X}" if hasattr(dtc, 'status') else "Unknown",
-                        "severity": getattr(dtc, 'severity', None),
-                    })
+                    dtcs.append(
+                        {
+                            "id": f"0x{dtc.id:06X}" if hasattr(dtc, "id") else "Unknown",
+                            "status": f"0x{dtc.status.get_byte_as_int():02X}"
+                            if hasattr(dtc, "status")
+                            else "Unknown",
+                            "severity": getattr(dtc, "severity", None),
+                        }
+                    )
 
             logger.info(f"Found {len(dtcs)} DTCs in {elapsed_ms:.1f}ms")
 
@@ -950,7 +973,7 @@ class UDSClient:
             if len(group_bytes) != 3:
                 return {"error": f"Group must be 3 bytes, got {len(group_bytes)}"}
 
-            group_int = int.from_bytes(group_bytes, byteorder='big')
+            group_int = int.from_bytes(group_bytes, byteorder="big")
 
             logger.info(f"Clearing DTCs for group: 0x{group_int:06X}")
             self.client.clear_dtc(group_int)
@@ -1030,7 +1053,11 @@ class UDSClient:
                 self.metrics.responses_received += 1
 
                 # Extract seed from response
-                seed = format_hex_string(response.service_data.seed) if hasattr(response.service_data, 'seed') else ""
+                seed = (
+                    format_hex_string(response.service_data.seed)
+                    if hasattr(response.service_data, "seed")
+                    else ""
+                )
 
                 logger.info(f"Received seed: {seed}")
 

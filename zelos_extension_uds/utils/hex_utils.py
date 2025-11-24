@@ -99,7 +99,9 @@ def format_hex_id(id_value: int, width: int = 4) -> str:
     return f"0x{id_value:0{width}X}"
 
 
-def validate_data_length(data: bytes, expected_length: int | None = None, max_length: int | None = None) -> dict[str, Any] | None:
+def validate_data_length(
+    data: bytes, expected_length: int | None = None, max_length: int | None = None
+) -> dict[str, Any] | None:
     """Validate data length constraints.
 
     :param data: Data bytes to validate

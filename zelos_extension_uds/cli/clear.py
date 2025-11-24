@@ -4,8 +4,8 @@ import logging
 
 import rich_click as click
 
-from . import operations
 from ..utils import parse_hex_string
+from . import operations
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def clear(
         click.echo(f"Error: Group must be 3 bytes, got {len(group_bytes)}", err=True)
         raise click.Abort()
 
-    group_int = int.from_bytes(group_bytes, byteorder='big')
+    group_int = int.from_bytes(group_bytes, byteorder="big")
 
     # Execute operation
     result = operations.clear_diagnostic_information(

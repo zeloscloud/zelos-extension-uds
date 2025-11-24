@@ -54,7 +54,7 @@ def run_app_mode(file: Path | None) -> None:
     # Determine output file if --file was specified
     output_file = None
     if file is not None:
-        if file == Path("."):
+        if file == Path():
             # Default filename using UTC timestamp
             output_file = Path(f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_uds.trz")
         else:

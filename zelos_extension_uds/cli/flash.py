@@ -5,8 +5,8 @@ from pathlib import Path
 
 import rich_click as click
 
-from . import operations
 from ..utils import parse_hex_string
+from . import operations
 
 logger = logging.getLogger(__name__)
 
@@ -14,14 +14,32 @@ logger = logging.getLogger(__name__)
 @click.command()
 @click.option("--txid", required=True, type=str, help="Transmit CAN ID in hex (e.g., 7E0)")
 @click.option("--rxid", required=True, type=str, help="Receive CAN ID in hex (e.g., 7E8)")
-@click.option("--file", "firmware_file", required=True, type=click.Path(exists=True, path_type=Path), help="Firmware file path (bin/hex/elf)")
-@click.option("--address", required=True, type=str, help="Base memory address in hex (e.g., 08000000)")
-@click.option("--block-size", type=int, default=None, help="Block size for transfer (auto-negotiated if not specified)")
+@click.option(
+    "--file",
+    "firmware_file",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Firmware file path (bin/hex/elf)",
+)
+@click.option(
+    "--address", required=True, type=str, help="Base memory address in hex (e.g., 08000000)"
+)
+@click.option(
+    "--block-size",
+    type=int,
+    default=None,
+    help="Block size for transfer (auto-negotiated if not specified)",
+)
 @click.option("--enable-tp", is_flag=True, help="Send tester present every 32 blocks")
 @click.option("--enable-security", is_flag=True, help="Perform security access before flashing")
 @click.option("--security-level", type=int, default=1, help="Security access level (default: 1)")
 @click.option("--security-key", type=str, default=None, help="Security key in hex")
-@click.option("--session", type=click.Choice(["default", "programming", "extended"]), default="programming", help="Diagnostic session type")
+@click.option(
+    "--session",
+    type=click.Choice(["default", "programming", "extended"]),
+    default="programming",
+    help="Diagnostic session type",
+)
 @click.option("--interface", type=str, default="socketcan", help="CAN interface type")
 @click.option("--channel", type=str, default="can0", help="CAN channel/device")
 @click.option("--bitrate", type=int, default=None, help="CAN bitrate (optional)")
@@ -92,7 +110,7 @@ def flash(
     session_type = session_map[session]
 
     # Execute flash operation
-    click.echo(f"Starting flash sequence...")
+    click.echo("Starting flash sequence...")
     result = operations.flash_firmware(
         tx_id=tx_id,
         rx_id=rx_id,
@@ -111,7 +129,7 @@ def flash(
 
     # Display result
     if result["status"] == "success":
-        click.echo(f"\nFlash completed successfully!")
+        click.echo("\nFlash completed successfully!")
         click.echo(f"  Address: {result['address']}")
         click.echo(f"  Size: {result['size']} bytes")
         click.echo(f"  Blocks: {result['blocks']}")
