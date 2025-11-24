@@ -128,22 +128,22 @@ class UDSClient:
             # Create ISO-TP addressing
             tp_addr = isotp.Address(isotp.AddressingMode.Normal_11bits, txid=tx_id, rxid=rx_id)
 
-            # Configure ISO-TP parameters
-            isotp_params = isotp.NotifierBasedCanStack.Params()
+            # Configure ISO-TP parameters as a dictionary
+            isotp_params = {}
 
             # Apply user-configured ISO-TP parameters if specified
             if "isotp_stmin" in self.config:
-                isotp_params.stmin = self.config["isotp_stmin"]
+                isotp_params["stmin"] = self.config["isotp_stmin"]
 
             if "isotp_blocksize" in self.config:
-                isotp_params.blocksize = self.config["isotp_blocksize"]
+                isotp_params["blocksize"] = self.config["isotp_blocksize"]
 
             if "isotp_tx_padding" in self.config or "isotp_rx_padding" in self.config:
-                isotp_params.tx_data_length = 8  # Full CAN frame
+                isotp_params["tx_data_length"] = 8  # Full CAN frame
                 if "isotp_tx_padding" in self.config:
-                    isotp_params.tx_padding = self.config["isotp_tx_padding"]
+                    isotp_params["tx_padding"] = self.config["isotp_tx_padding"]
                 if "isotp_padding_value" in self.config:
-                    isotp_params.tx_padding_byte = self.config["isotp_padding_value"]
+                    isotp_params["tx_padding_byte"] = self.config["isotp_padding_value"]
 
             # Create notifier and ISO-TP stack
             self.notifier = can.Notifier(self.bus, [])
