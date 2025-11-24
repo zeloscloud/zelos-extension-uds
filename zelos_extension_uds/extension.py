@@ -116,26 +116,46 @@ class UDSClient:
     - Tester Present
     """
 
+    # UDS service ID constants
+    SID_DIAGNOSTIC_SESSION_CONTROL = 0x10
+    SID_ECU_RESET = 0x11
+    SID_CLEAR_DIAGNOSTIC_INFORMATION = 0x14
+    SID_READ_DTC_INFORMATION = 0x19
+    SID_READ_DATA_BY_IDENTIFIER = 0x22
+    SID_READ_MEMORY_BY_ADDRESS = 0x23
+    SID_READ_SCALING_DATA_BY_IDENTIFIER = 0x24
+    SID_SECURITY_ACCESS = 0x27
+    SID_COMMUNICATION_CONTROL = 0x28
+    SID_WRITE_DATA_BY_IDENTIFIER = 0x2E
+    SID_INPUT_OUTPUT_CONTROL_BY_IDENTIFIER = 0x2F
+    SID_ROUTINE_CONTROL = 0x31
+    SID_REQUEST_DOWNLOAD = 0x34
+    SID_REQUEST_UPLOAD = 0x35
+    SID_TRANSFER_DATA = 0x36
+    SID_REQUEST_TRANSFER_EXIT = 0x37
+    SID_TESTER_PRESENT = 0x3E
+    SID_CONTROL_DTC_SETTING = 0x85
+
     # UDS service IDs for trace logging
     SERVICE_NAMES = {
-        0x10: "DiagnosticSessionControl",
-        0x11: "ECUReset",
-        0x14: "ClearDiagnosticInformation",
-        0x19: "ReadDTCInformation",
-        0x22: "ReadDataByIdentifier",
-        0x23: "ReadMemoryByAddress",
-        0x24: "ReadScalingDataByIdentifier",
-        0x27: "SecurityAccess",
-        0x28: "CommunicationControl",
-        0x2E: "WriteDataByIdentifier",
-        0x2F: "InputOutputControlByIdentifier",
-        0x31: "RoutineControl",
-        0x34: "RequestDownload",
-        0x35: "RequestUpload",
-        0x36: "TransferData",
-        0x37: "RequestTransferExit",
-        0x3E: "TesterPresent",
-        0x85: "ControlDTCSetting",
+        SID_DIAGNOSTIC_SESSION_CONTROL: "DiagnosticSessionControl",
+        SID_ECU_RESET: "ECUReset",
+        SID_CLEAR_DIAGNOSTIC_INFORMATION: "ClearDiagnosticInformation",
+        SID_READ_DTC_INFORMATION: "ReadDTCInformation",
+        SID_READ_DATA_BY_IDENTIFIER: "ReadDataByIdentifier",
+        SID_READ_MEMORY_BY_ADDRESS: "ReadMemoryByAddress",
+        SID_READ_SCALING_DATA_BY_IDENTIFIER: "ReadScalingDataByIdentifier",
+        SID_SECURITY_ACCESS: "SecurityAccess",
+        SID_COMMUNICATION_CONTROL: "CommunicationControl",
+        SID_WRITE_DATA_BY_IDENTIFIER: "WriteDataByIdentifier",
+        SID_INPUT_OUTPUT_CONTROL_BY_IDENTIFIER: "InputOutputControlByIdentifier",
+        SID_ROUTINE_CONTROL: "RoutineControl",
+        SID_REQUEST_DOWNLOAD: "RequestDownload",
+        SID_REQUEST_UPLOAD: "RequestUpload",
+        SID_TRANSFER_DATA: "TransferData",
+        SID_REQUEST_TRANSFER_EXIT: "RequestTransferExit",
+        SID_TESTER_PRESENT: "TesterPresent",
+        SID_CONTROL_DTC_SETTING: "ControlDTCSetting",
     }
 
     def __init__(
@@ -459,6 +479,9 @@ class UDSClient:
         try:
             start_time = time.time()
 
+            # Log TX event
+            self._log_uds_tx(self.SID_READ_DATA_BY_IDENTIFIER, did_int, None)
+
             # Use udsoncan's standard read_data_by_identifier API
             # HexDidCodec is registered as default codec in client config
             response = self.client.read_data_by_identifier([did_int])
@@ -474,7 +497,8 @@ class UDSClient:
 
             data_hex = format_hex_string(data)
 
-            self._log_uds_event(0x22, did_int, data, True, elapsed)
+            # Log RX event
+            self._log_uds_rx(self.SID_READ_DATA_BY_IDENTIFIER, did_int, data, True, elapsed)
 
             return {
                 "status": "success",
@@ -535,6 +559,9 @@ class UDSClient:
         try:
             start_time = time.time()
 
+            # Log TX event
+            self._log_uds_tx(self.SID_WRITE_DATA_BY_IDENTIFIER, did_int, data_bytes)
+
             # Use udsoncan's standard write_data_by_identifier API
             # HexDidCodec is registered as default codec and accepts bytes directly
             response = self.client.write_data_by_identifier(did_int, data_bytes)
@@ -543,13 +570,15 @@ class UDSClient:
 
             # Check for positive response
             if not response.positive:
-                self._log_uds_event(0x2E, did_int, data_bytes, False, elapsed)
+                # Log RX event with failure
+                self._log_uds_rx(self.SID_WRITE_DATA_BY_IDENTIFIER, did_int, None, False, elapsed)
                 return {
                     "error": f"Negative response: {response.code_name}",
                     "nrc": response.code,
                 }
 
-            self._log_uds_event(0x2E, did_int, data_bytes, True, elapsed)
+            # Log RX event with success
+            self._log_uds_rx(self.SID_WRITE_DATA_BY_IDENTIFIER, did_int, None, True, elapsed)
 
             return {
                 "status": "success",
@@ -599,6 +628,9 @@ class UDSClient:
         try:
             start_time = time.time()
 
+            # Log TX event
+            self._log_uds_tx(self.SID_ECU_RESET, reset_type_map[reset_type], None)
+
             # Send UDS request
             response = self.client.ecu_reset(reset_type_map[reset_type])
 
@@ -606,13 +638,17 @@ class UDSClient:
 
             # Check for positive response
             if not response.positive:
-                self._log_uds_event(0x11, reset_type_map[reset_type], None, False, elapsed)
+                # Log RX event with failure
+                self._log_uds_rx(
+                    self.SID_ECU_RESET, reset_type_map[reset_type], None, False, elapsed
+                )
                 return {
                     "error": f"Negative response: {response.code_name}",
                     "nrc": response.code,
                 }
 
-            self._log_uds_event(0x11, reset_type_map[reset_type], None, True, elapsed)
+            # Log RX event with success
+            self._log_uds_rx(self.SID_ECU_RESET, reset_type_map[reset_type], None, True, elapsed)
 
             # ECU may respond with power down time
             power_down_time = getattr(response.service_data, "power_down_time", None)
@@ -843,18 +879,24 @@ class UDSClient:
         try:
             start_time = time.time()
 
+            # Log TX event
+            self._log_uds_tx(self.SID_TESTER_PRESENT, 0, None)
+
             # Send UDS request
             response = self.client.tester_present(suppress_positive_response=suppress_response)
 
             elapsed = time.time() - start_time
 
             if response and not response.positive:
+                # Log RX event with failure
+                self._log_uds_rx(self.SID_TESTER_PRESENT, 0, None, False, elapsed)
                 return {
                     "error": f"Negative response: {response.code_name}",
                     "nrc": response.code,
                 }
 
-            self._log_uds_event(0x3E, 0, None, True, elapsed)
+            # Log RX event with success
+            self._log_uds_rx(self.SID_TESTER_PRESENT, 0, None, True, elapsed)
 
             return {
                 "status": "success",
@@ -1161,9 +1203,20 @@ class UDSClient:
 
     def _define_schema(self) -> None:
         """Define trace schema for UDS events."""
-        # UDS request/response events
+        # TX (transmit/request) events
         self.source.add_event(
-            "uds_transactions",
+            "tx",
+            [
+                zelos_sdk.TraceEventFieldMetadata("service_id", zelos_sdk.DataType.UInt8),
+                zelos_sdk.TraceEventFieldMetadata("service_name", zelos_sdk.DataType.String),
+                zelos_sdk.TraceEventFieldMetadata("parameter", zelos_sdk.DataType.UInt32),
+                zelos_sdk.TraceEventFieldMetadata("data", zelos_sdk.DataType.Binary),
+            ],
+        )
+
+        # RX (receive/response) events
+        self.source.add_event(
+            "rx",
             [
                 zelos_sdk.TraceEventFieldMetadata("service_id", zelos_sdk.DataType.UInt8),
                 zelos_sdk.TraceEventFieldMetadata("service_name", zelos_sdk.DataType.String),
@@ -1174,7 +1227,28 @@ class UDSClient:
             ],
         )
 
-    def _log_uds_event(
+    def _log_uds_tx(
+        self,
+        service_id: int,
+        parameter: int,
+        data: bytes | None,
+    ) -> None:
+        """Log UDS TX (request) event to trace.
+
+        :param service_id: UDS service ID
+        :param parameter: Service parameter (DID, routine ID, etc.)
+        :param data: Request data
+        """
+        service_name = self.SERVICE_NAMES.get(service_id, f"Unknown_0x{service_id:02X}")
+
+        self.source.tx.log(
+            service_id=service_id,
+            service_name=service_name,
+            parameter=parameter,
+            data=data if data else b"",
+        )
+
+    def _log_uds_rx(
         self,
         service_id: int,
         parameter: int,
@@ -1182,17 +1256,17 @@ class UDSClient:
         success: bool,
         elapsed: float,
     ) -> None:
-        """Log UDS transaction event to trace.
+        """Log UDS RX (response) event to trace.
 
         :param service_id: UDS service ID
         :param parameter: Service parameter (DID, routine ID, etc.)
-        :param data: Request/response data
+        :param data: Response data
         :param success: Whether request was successful
         :param elapsed: Elapsed time in seconds
         """
         service_name = self.SERVICE_NAMES.get(service_id, f"Unknown_0x{service_id:02X}")
 
-        self.source.uds_transactions.log(
+        self.source.rx.log(
             service_id=service_id,
             service_name=service_name,
             parameter=parameter,
