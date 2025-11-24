@@ -1117,7 +1117,7 @@ class UDSClient:
                 zelos_sdk.TraceEventFieldMetadata("service_name", zelos_sdk.DataType.String),
                 zelos_sdk.TraceEventFieldMetadata("parameter", zelos_sdk.DataType.UInt32),
                 zelos_sdk.TraceEventFieldMetadata("data", zelos_sdk.DataType.Binary),
-                zelos_sdk.TraceEventFieldMetadata("success", zelos_sdk.DataType.Bool),
+                zelos_sdk.TraceEventFieldMetadata("success", zelos_sdk.DataType.Boolean),
                 zelos_sdk.TraceEventFieldMetadata("elapsed_ms", zelos_sdk.DataType.Float32, "ms"),
             ],
         )
