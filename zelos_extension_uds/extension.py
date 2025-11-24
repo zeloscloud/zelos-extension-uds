@@ -181,6 +181,8 @@ class UDSClient:
         # Periodic tester present task (controlled by action, not config)
         self.tester_present_task: asyncio.Task | None = None
         self.tester_present_interval: float = 0  # Disabled by default
+        self.current_tx_id: int | None = None  # Track current TX ID
+        self.current_rx_id: int | None = None  # Track current RX ID
 
         # Create trace source (in isolated namespace if provided)
         if self.namespace:
@@ -208,9 +210,18 @@ class UDSClient:
 
             self.bus = can.Bus(**bus_kwargs)
 
-            # Configure ISO-TP addressing (parsed from config hex strings to integers)
-            tx_id = self.config.get("tx_id", 0x7E0)  # Outgoing requests (tester→ECU)
-            rx_id = self.config.get("rx_id", 0x7E8)  # Incoming responses (ECU→tester)
+            # Configure ISO-TP addressing (optional in global config)
+            # If not specified, will be required per-action
+            tx_id = self.config.get("tx_id")
+            rx_id = self.config.get("rx_id")
+
+            # Only create default connection if both TX/RX IDs are provided in config
+            if tx_id is None or rx_id is None:
+                logger.info("TX/RX IDs not specified in config - will require per-action")
+                # Connection will be created on first action with TX/RX IDs
+                self.running = True
+                logger.info("UDS client started (no default connection)")
+                return
 
             logger.info(f"UDS addressing: TX=0x{tx_id:03X}, RX=0x{rx_id:03X}")
 
@@ -345,7 +356,11 @@ class UDSClient:
                 self.tester_present_task.cancel()
 
     async def _periodic_tester_present(self) -> None:
-        """Send periodic tester present messages."""
+        """Send periodic tester present messages on the stored TX/RX IDs."""
+        # Ensure connection is set to the stored IDs
+        if self.current_tx_id is not None and self.current_rx_id is not None:
+            self._setup_connection_with_ids(self.current_tx_id, self.current_rx_id)
+
         while self.running:
             try:
                 await asyncio.sleep(self.tester_present_interval)
@@ -353,14 +368,134 @@ class UDSClient:
                 if not self.running or not self.client:
                     break
 
+                # Verify we're still using the correct IDs
+                if self.current_tx_id is not None and self.current_rx_id is not None:
+                    self._setup_connection_with_ids(self.current_tx_id, self.current_rx_id)
+
                 # Send tester present (suppress positive response)
                 response = self.client.tester_present(suppress_positive_response=True)
 
                 if response:
                     logger.debug("Tester present sent")
 
+            except asyncio.CancelledError:
+                logger.info("Periodic tester present cancelled")
+                break
             except Exception as e:
                 logger.warning(f"Periodic tester present error: {e}")
+
+    # ========== HELPERS ==========
+
+    def _resolve_tx_rx_ids(
+        self, tx_id: str | None = None, rx_id: str | None = None
+    ) -> tuple[int, int] | dict[str, str]:
+        """Resolve TX/RX IDs from action parameters or global config.
+
+        :param tx_id: Optional action-specific TX ID (hex string)
+        :param rx_id: Optional action-specific RX ID (hex string)
+        :return: Tuple of (tx_id_int, rx_id_int) or error dict
+        """
+        # Try action-specific TX ID first
+        if tx_id:
+            tx_id_int = validate_hex_id(tx_id, max_value=0x7FF)
+            if isinstance(tx_id_int, dict):
+                return {"error": f"Invalid TX ID: {tx_id_int['error']}"}
+        else:
+            # Fall back to global config
+            tx_id_int = self.config.get("tx_id")
+            if tx_id_int is None:
+                return {"error": "No TX ID specified (provide in action or global config)"}
+
+        # Try action-specific RX ID first
+        if rx_id:
+            rx_id_int = validate_hex_id(rx_id, max_value=0x7FF)
+            if isinstance(rx_id_int, dict):
+                return {"error": f"Invalid RX ID: {rx_id_int['error']}"}
+        else:
+            # Fall back to global config
+            rx_id_int = self.config.get("rx_id")
+            if rx_id_int is None:
+                return {"error": "No RX ID specified (provide in action or global config)"}
+
+        return (tx_id_int, rx_id_int)
+
+    def _setup_connection_with_ids(self, tx_id: int, rx_id: int) -> None:
+        """Setup or reconfigure ISO-TP connection with specific TX/RX IDs.
+
+        :param tx_id: Transmit CAN ID (tester→ECU)
+        :param rx_id: Receive CAN ID (ECU→tester)
+        """
+        # Check if IDs match current connection
+        if self.isotp_stack and hasattr(self.isotp_stack, "address"):
+            current_addr = self.isotp_stack.address
+            if (
+                hasattr(current_addr, "txid")
+                and current_addr.txid == tx_id
+                and hasattr(current_addr, "rxid")
+                and current_addr.rxid == rx_id
+            ):
+                # Already configured correctly
+                return
+
+            # IDs changed - update the address
+            logger.debug(f"Updating connection IDs: TX=0x{tx_id:03X}, RX=0x{rx_id:03X}")
+            new_addr = isotp.Address(isotp.AddressingMode.Normal_11bits, txid=tx_id, rxid=rx_id)
+            self.isotp_stack.address = new_addr
+            return
+
+        # First time setup
+        logger.debug(f"Setting up connection: TX=0x{tx_id:03X}, RX=0x{rx_id:03X}")
+
+        # Create new ISO-TP addressing
+        tp_addr = isotp.Address(isotp.AddressingMode.Normal_11bits, txid=tx_id, rxid=rx_id)
+
+        # Configure ISO-TP parameters
+        isotp_params = {}
+        if "isotp_stmin" in self.config:
+            isotp_params["stmin"] = self.config["isotp_stmin"]
+        if "isotp_blocksize" in self.config:
+            isotp_params["blocksize"] = self.config["isotp_blocksize"]
+        if "isotp_tx_padding" in self.config or "isotp_rx_padding" in self.config:
+            isotp_params["tx_data_length"] = 8
+            if "isotp_tx_padding" in self.config:
+                isotp_params["tx_padding"] = self.config["isotp_tx_padding"]
+            if "isotp_padding_value" in self.config:
+                isotp_params["tx_padding_byte"] = self.config["isotp_padding_value"]
+
+        # Create notifier if it doesn't exist yet (first connection)
+        if not self.notifier:
+            self.notifier = can.Notifier(self.bus, [])
+
+        # Create ISO-TP stack
+        self.isotp_stack = isotp.NotifierBasedCanStack(
+            bus=self.bus, notifier=self.notifier, address=tp_addr, params=isotp_params
+        )
+
+        # Create connection
+        self.connection = PythonIsoTpConnection(self.isotp_stack)
+
+        # Create or update client
+        if not self.client:
+            # First time - create client with configuration
+            config = udsoncan.configs.default_client_config.copy()
+            config["data_identifiers"] = {"default": HexDidCodec}
+            config["input_output"] = {}
+
+            if "request_timeout" in self.config:
+                config["request_timeout"] = self.config["request_timeout"]
+            if "p2_timeout" in self.config:
+                config["p2_timeout"] = self.config["p2_timeout"]
+            if "p2_star_timeout" in self.config:
+                config["p2_star_timeout"] = self.config["p2_star_timeout"]
+            if "use_external_sniffer" in self.config:
+                config["use_external_sniffer"] = self.config["use_external_sniffer"]
+
+            self.client = Client(self.connection, config=config)
+            self.client.open()
+        else:
+            # Update existing client connection
+            self.client.set_connection(self.connection)
+            self.client.open()
 
     # ========== ACTIONS ==========
 
@@ -400,14 +535,41 @@ class UDSClient:
         ],
         default="Extended Diagnostic Session",
     )
-    def diagnostic_session_control(self, session_type: str) -> dict[str, Any]:
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def diagnostic_session_control(
+        self, session_type: str, tx_id: str = "", rx_id: str = ""
+    ) -> dict[str, Any]:
         """Change diagnostic session using DiagnosticSessionControl service.
 
         :param session_type: Type of session to activate
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Response with status or error
         """
         if not self.client:
             return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map session type to UDS session value
         session_type_map = {
@@ -460,16 +622,41 @@ class UDSClient:
         placeholder="0x1234",
         default="0x1234",
     )
-    def read_data_by_identifier(self, did: str) -> dict[str, Any]:
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def read_data_by_identifier(self, did: str, tx_id: str = "", rx_id: str = "") -> dict[str, Any]:
         """Read data from ECU using ReadDataByIdentifier service.
 
         Uses udsoncan's codec architecture with HexDidCodec for dynamic DID reads.
 
         :param did: Data Identifier as hex string
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Response with data or error
         """
         if not self.client:
             return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Validate and parse DID
         did_int = validate_hex_id(did, max_value=0xFFFF)
@@ -534,17 +721,44 @@ class UDSClient:
         placeholder="01 02 03 04",
         default="00",
     )
-    def write_data_by_identifier(self, did: str, data: str) -> dict[str, Any]:
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def write_data_by_identifier(
+        self, did: str, data: str, tx_id: str = "", rx_id: str = ""
+    ) -> dict[str, Any]:
         """Write data to ECU using WriteDataByIdentifier service.
 
         Uses udsoncan's codec architecture with HexDidCodec for dynamic DID writes.
 
         :param did: Data Identifier as hex string
         :param data: Data to write as hex string
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Response with status or error
         """
         if not self.client:
             return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Validate and parse DID
         did_int = validate_hex_id(did, max_value=0xFFFF)
@@ -606,14 +820,39 @@ class UDSClient:
         choices=["Hard Reset", "Soft Reset", "Key Off On Reset"],
         default="Soft Reset",
     )
-    def ecu_reset(self, reset_type: str) -> dict[str, Any]:
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def ecu_reset(self, reset_type: str, tx_id: str = "", rx_id: str = "") -> dict[str, Any]:
         """Perform ECU reset using ECUReset service.
 
         :param reset_type: Type of reset ("Hard Reset", "Soft Reset", "Key Off On Reset")
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Response with status or error
         """
         if not self.client:
             return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map reset type to UDS reset type value
         reset_type_map = {
@@ -690,16 +929,43 @@ class UDSClient:
         placeholder="01 02",
         default="",
     )
-    def routine_control(self, control_type: str, routine_id: str, data: str = "") -> dict[str, Any]:
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def routine_control(
+        self, control_type: str, routine_id: str, data: str = "", tx_id: str = "", rx_id: str = ""
+    ) -> dict[str, Any]:
         """Control diagnostic routine using RoutineControl service.
 
         :param control_type: Control operation type
         :param routine_id: Routine identifier as hex string
         :param data: Optional data as hex string
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Response with routine results or error
         """
         if not self.client:
             return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map control type to UDS control type value
         control_type_map = {
@@ -787,18 +1053,48 @@ class UDSClient:
         placeholder="01 02",
         default="",
     )
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
     def input_output_control(
-        self, did: str, control_parameter: str, control_option: str = ""
+        self,
+        did: str,
+        control_parameter: str,
+        control_option: str = "",
+        tx_id: str = "",
+        rx_id: str = "",
     ) -> dict[str, Any]:
         """Control input/output using InputOutputControlByIdentifier service.
 
         :param did: Data Identifier as hex string
         :param control_parameter: Control parameter type
         :param control_option: Optional control option record as hex string
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Response with status or error
         """
         if not self.client:
             return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map control parameter to UDS control parameter value
         control_param_map = {
@@ -867,14 +1163,41 @@ class UDSClient:
         default=False,
         widget="toggle",
     )
-    def send_tester_present(self, suppress_response: bool = False) -> dict[str, Any]:
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def send_tester_present(
+        self, suppress_response: bool = False, tx_id: str = "", rx_id: str = ""
+    ) -> dict[str, Any]:
         """Send tester present message using TesterPresent service.
 
         :param suppress_response: Whether to suppress positive response
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Response with status or error
         """
         if not self.client:
             return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         try:
             start_time = time.time()
@@ -908,7 +1231,14 @@ class UDSClient:
             logger.error(f"Tester present error: {e}")
             return {"error": str(e)}
 
-    @action("Start Periodic Tester Present", "Enable automatic tester present")
+    @action("Periodic Tester Present", "Start/stop periodic tester present")
+    @action.boolean(
+        "enabled",
+        title="Enable",
+        description="Start or stop periodic tester present",
+        default=False,
+        widget="toggle",
+    )
     @action.number(
         "interval",
         minimum=0.5,
@@ -919,20 +1249,80 @@ class UDSClient:
         description="Send tester present every N seconds",
         widget="range",
     )
-    def start_periodic_tester_present(self, interval: float) -> dict[str, Any]:
-        """Start sending periodic tester present messages.
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def periodic_tester_present(
+        self, enabled: bool, interval: float, tx_id: str = "", rx_id: str = ""
+    ) -> dict[str, Any]:
+        """Start or stop periodic tester present messages.
 
+        When started, tester present will run on the specified TX/RX IDs.
+        Starting a new session will cancel any existing session.
+
+        :param enabled: True to start, False to stop
         :param interval: Interval in seconds between messages
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Status dictionary
         """
         if not self.client:
             return {"error": "UDS client not started"}
 
-        if self.tester_present_task and not self.tester_present_task.done():
-            return {"error": "Periodic tester present already running"}
+        # Stop requested
+        if not enabled:
+            if self.tester_present_interval == 0:
+                return {"message": "Periodic tester present not active"}
 
+            if self.tester_present_task:
+                self.tester_present_task.cancel()
+                self.tester_present_task = None
+
+            self.tester_present_interval = 0
+            self.current_tx_id = None
+            self.current_rx_id = None
+            logger.info("Stopped periodic tester present")
+
+            return {
+                "status": "stopped",
+                "message": "Periodic tester present disabled",
+            }
+
+        # Start requested - resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
+
+        # Cancel existing task if running
+        if self.tester_present_task and not self.tester_present_task.done():
+            logger.info("Cancelling existing periodic tester present")
+            self.tester_present_task.cancel()
+            self.tester_present_task = None
+
+        # Store TX/RX IDs for this tester present session
+        self.current_tx_id = resolved_tx_id
+        self.current_rx_id = resolved_rx_id
         self.tester_present_interval = interval
-        logger.info(f"Starting periodic tester present: {interval}s")
+
+        logger.info(
+            f"Starting periodic tester present: {interval}s on "
+            f"TX=0x{resolved_tx_id:03X}, RX=0x{resolved_rx_id:03X}"
+        )
 
         # Create background task
         self.tester_present_task = asyncio.create_task(self._periodic_tester_present())
@@ -940,28 +1330,9 @@ class UDSClient:
         return {
             "status": "started",
             "interval": interval,
+            "tx_id": format_hex_id(resolved_tx_id, width=3),
+            "rx_id": format_hex_id(resolved_rx_id, width=3),
             "message": f"Sending tester present every {interval}s",
-        }
-
-    @action("Stop Periodic Tester Present", "Disable automatic tester present")
-    def stop_periodic_tester_present(self) -> dict[str, Any]:
-        """Stop sending periodic tester present messages.
-
-        :return: Status dictionary
-        """
-        if self.tester_present_interval == 0:
-            return {"message": "Periodic tester present not active"}
-
-        if self.tester_present_task:
-            self.tester_present_task.cancel()
-            self.tester_present_task = None
-
-        self.tester_present_interval = 0
-        logger.info("Stopped periodic tester present")
-
-        return {
-            "status": "stopped",
-            "message": "Periodic tester present disabled",
         }
 
     @action("Read DTC Information", "Read diagnostic trouble codes")
@@ -982,14 +1353,41 @@ class UDSClient:
         ],
         default="All DTCs",
     )
-    def read_dtc_information(self, status_mask: str) -> dict[str, Any]:
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def read_dtc_information(
+        self, status_mask: str, tx_id: str = "", rx_id: str = ""
+    ) -> dict[str, Any]:
         """Read diagnostic trouble codes using ReadDTCInformation service.
 
         :param status_mask: Type of DTCs to read
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Response with DTCs or error
         """
         if not self.client:
             return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map status mask to values
         status_mask_map = {
@@ -1059,14 +1457,41 @@ class UDSClient:
         placeholder="FFFFFF",
         default="FFFFFF",
     )
-    def clear_diagnostic_information(self, group: str = "FFFFFF") -> dict[str, Any]:
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def clear_diagnostic_information(
+        self, group: str = "FFFFFF", tx_id: str = "", rx_id: str = ""
+    ) -> dict[str, Any]:
         """Clear diagnostic trouble codes using ClearDiagnosticInformation service.
 
         :param group: DTC group mask (3 bytes hex, FFFFFF = all DTCs)
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Success status or error
         """
         if not self.client:
             return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         try:
             start_time = time.time()
@@ -1120,15 +1545,42 @@ class UDSClient:
         placeholder="",
         default="",
     )
-    def security_access(self, access_level: str, key: str = "") -> dict[str, Any]:
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def security_access(
+        self, access_level: str, key: str = "", tx_id: str = "", rx_id: str = ""
+    ) -> dict[str, Any]:
         """Request security access using SecurityAccess service.
 
         :param access_level: Security access level
         :param key: Optional security key (empty = request seed)
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
         :return: Response with seed/status or error
         """
         if not self.client:
             return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Setup connection with resolved IDs
+        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map access level to request/send key sub-functions
         # Odd = request seed, Even = send key
