@@ -1,6 +1,4 @@
-# Zelos UDS Extension
-
-> Unified Diagnostic Services (UDS) over CAN for automotive diagnostics
+# Zelos Unified Diagnostic Services (UDS) Extension
 
 A Zelos extension implementing UDS (ISO 14229) diagnostic protocol over CAN with ISO-TP transport, built with the [Zelos SDK](https://docs.zeloscloud.io/sdk).
 

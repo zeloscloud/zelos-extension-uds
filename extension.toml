@@ -3,7 +3,7 @@
 
 name = "Zelos UDS"
 version = "0.1.1"
-description = "Unified Diagnostic Services (UDS) over CAN for automotive diagnostics"
+description = "Zelos Unified Diagnostic Services (UDS)"
 author = "Zelos"
 repository = "https://github.com/zeloscloud/zelos-extension-uds"
 homepage = "https://github.com/zeloscloud/zelos-extension-uds"

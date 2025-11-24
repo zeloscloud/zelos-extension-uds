@@ -27,7 +27,7 @@
           "properties": {
             "interface": {
               "enum": [
-
+                "socketcan"
               ]
             },
             "channel": {
@@ -39,7 +39,7 @@
             "tx_id": {
               "type": "string",
               "title": "TX CAN ID (hex)",
-              "description": "CAN ID for outgoing requests (tester→ECU)",
+              "description": "CAN ID for outgoing requests (tester->ECU)",
               "default": "0x7E0",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E0",
@@ -48,7 +48,7 @@
             "rx_id": {
               "type": "string",
               "title": "RX CAN ID (hex)",
-              "description": "CAN ID for incoming responses (ECU→tester)",
+              "description": "CAN ID for incoming responses (ECU->tester)",
               "default": "0x7E8",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E8",
@@ -68,7 +68,7 @@
             },
             "show_advanced": {
               "type": "boolean",
-              "title": "Advanced Settings",
+              "title": "Show Advanced Settings",
               "description": "Show advanced timeout and protocol settings",
               "default": false,
               "ui:widget": "toggle"
@@ -104,8 +104,8 @@
                       "description": "Maximum time to wait for UDS response",
                       "minimum": 0.1,
                       "maximum": 30.0,
-                      "ui:placeholder": "5.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                      "default": 5.0,
+                      "ui:help": "Total timeout for complete request/response cycle"
                     },
                     "p2_timeout": {
                       "type": "number",
@@ -113,8 +113,8 @@
                       "description": "Default P2 timeout per ISO 14229",
                       "minimum": 0.05,
                       "maximum": 5.0,
-                      "ui:placeholder": "1.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 1.0s)"
+                      "default": 1.0,
+                      "ui:help": "Time for ECU to start sending response"
                     },
                     "p2_star_timeout": {
                       "type": "number",
@@ -122,56 +122,8 @@
                       "description": "Enhanced P2 timeout for long operations",
                       "minimum": 1.0,
                       "maximum": 60.0,
-                      "ui:placeholder": "5.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
-                    },
-                    "isotp_stmin": {
-                      "type": "number",
-                      "title": "ISO-TP STmin (ms)",
-                      "description": "Minimum separation time between consecutive frames",
-                      "minimum": 0,
-                      "maximum": 127,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0ms)"
-                    },
-                    "isotp_blocksize": {
-                      "type": "integer",
-                      "title": "ISO-TP Block Size",
-                      "description": "Number of consecutive frames before flow control",
-                      "minimum": 0,
-                      "maximum": 255,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0 = no limit)"
-                    },
-                    "isotp_tx_padding": {
-                      "type": "boolean",
-                      "title": "ISO-TP TX Padding",
-                      "description": "Pad transmitted frames to 8 bytes",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use python-can default (disabled)"
-                    },
-                    "isotp_rx_padding": {
-                      "type": "boolean",
-                      "title": "ISO-TP RX Padding",
-                      "description": "Expect padded received frames",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use python-can default (disabled)"
-                    },
-                    "isotp_padding_value": {
-                      "type": "integer",
-                      "title": "ISO-TP Padding Byte Value",
-                      "description": "Byte value used for padding (typically 0x00 or 0xCC)",
-                      "minimum": 0,
-                      "maximum": 255,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0x00)"
-                    },
-                    "use_external_sniffer": {
-                      "type": "boolean",
-                      "title": "External Sniffer Mode",
-                      "description": "Optimize for passive sniffing (disables TX)",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use default (disabled)"
+                      "default": 5.0,
+                      "ui:help": "Extended timeout for flash/programming operations"
                     },
                     "config_json": {
                       "type": "string",
@@ -213,7 +165,7 @@
             "tx_id": {
               "type": "string",
               "title": "TX CAN ID (hex)",
-              "description": "CAN ID for outgoing requests (tester→ECU)",
+              "description": "CAN ID for outgoing requests (tester->ECU)",
               "default": "0x7E0",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E0",
@@ -222,7 +174,7 @@
             "rx_id": {
               "type": "string",
               "title": "RX CAN ID (hex)",
-              "description": "CAN ID for incoming responses (ECU→tester)",
+              "description": "CAN ID for incoming responses (ECU->tester)",
               "default": "0x7E8",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E8",
@@ -242,7 +194,7 @@
             },
             "show_advanced": {
               "type": "boolean",
-              "title": "Advanced Settings",
+              "title": "Show Advanced Settings",
               "description": "Show advanced timeout and protocol settings",
               "default": false,
               "ui:widget": "toggle"
@@ -279,8 +231,8 @@
                       "description": "Maximum time to wait for UDS response",
                       "minimum": 0.1,
                       "maximum": 30.0,
-                      "ui:placeholder": "5.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                      "default": 5.0,
+                      "ui:help": "Total timeout for complete request/response cycle"
                     },
                     "p2_timeout": {
                       "type": "number",
@@ -288,8 +240,8 @@
                       "description": "Default P2 timeout per ISO 14229",
                       "minimum": 0.05,
                       "maximum": 5.0,
-                      "ui:placeholder": "1.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 1.0s)"
+                      "default": 1.0,
+                      "ui:help": "Time for ECU to start sending response"
                     },
                     "p2_star_timeout": {
                       "type": "number",
@@ -297,56 +249,8 @@
                       "description": "Enhanced P2 timeout for long operations",
                       "minimum": 1.0,
                       "maximum": 60.0,
-                      "ui:placeholder": "5.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
-                    },
-                    "isotp_stmin": {
-                      "type": "number",
-                      "title": "ISO-TP STmin (ms)",
-                      "description": "Minimum separation time between consecutive frames",
-                      "minimum": 0,
-                      "maximum": 127,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0ms)"
-                    },
-                    "isotp_blocksize": {
-                      "type": "integer",
-                      "title": "ISO-TP Block Size",
-                      "description": "Number of consecutive frames before flow control",
-                      "minimum": 0,
-                      "maximum": 255,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0 = no limit)"
-                    },
-                    "isotp_tx_padding": {
-                      "type": "boolean",
-                      "title": "ISO-TP TX Padding",
-                      "description": "Pad transmitted frames to 8 bytes",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use python-can default (disabled)"
-                    },
-                    "isotp_rx_padding": {
-                      "type": "boolean",
-                      "title": "ISO-TP RX Padding",
-                      "description": "Expect padded received frames",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use python-can default (disabled)"
-                    },
-                    "isotp_padding_value": {
-                      "type": "integer",
-                      "title": "ISO-TP Padding Byte Value",
-                      "description": "Byte value used for padding (typically 0x00 or 0xCC)",
-                      "minimum": 0,
-                      "maximum": 255,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0x00)"
-                    },
-                    "use_external_sniffer": {
-                      "type": "boolean",
-                      "title": "External Sniffer Mode",
-                      "description": "Optimize for passive sniffing (disables TX)",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use default (disabled)"
+                      "default": 5.0,
+                      "ui:help": "Extended timeout for flash/programming operations"
                     },
                     "config_json": {
                       "type": "string",
@@ -388,7 +292,7 @@
             "tx_id": {
               "type": "string",
               "title": "TX CAN ID (hex)",
-              "description": "CAN ID for outgoing requests (tester→ECU)",
+              "description": "CAN ID for outgoing requests (tester->ECU)",
               "default": "0x7E0",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E0",
@@ -397,7 +301,7 @@
             "rx_id": {
               "type": "string",
               "title": "RX CAN ID (hex)",
-              "description": "CAN ID for incoming responses (ECU→tester)",
+              "description": "CAN ID for incoming responses (ECU->tester)",
               "default": "0x7E8",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E8",
@@ -417,7 +321,7 @@
             },
             "show_advanced": {
               "type": "boolean",
-              "title": "Advanced Settings",
+              "title": "Show Advanced Settings",
               "description": "Show advanced timeout and protocol settings",
               "default": false,
               "ui:widget": "toggle"
@@ -454,8 +358,8 @@
                       "description": "Maximum time to wait for UDS response",
                       "minimum": 0.1,
                       "maximum": 30.0,
-                      "ui:placeholder": "5.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                      "default": 5.0,
+                      "ui:help": "Total timeout for complete request/response cycle"
                     },
                     "p2_timeout": {
                       "type": "number",
@@ -463,8 +367,8 @@
                       "description": "Default P2 timeout per ISO 14229",
                       "minimum": 0.05,
                       "maximum": 5.0,
-                      "ui:placeholder": "1.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 1.0s)"
+                      "default": 1.0,
+                      "ui:help": "Time for ECU to start sending response"
                     },
                     "p2_star_timeout": {
                       "type": "number",
@@ -472,56 +376,8 @@
                       "description": "Enhanced P2 timeout for long operations",
                       "minimum": 1.0,
                       "maximum": 60.0,
-                      "ui:placeholder": "5.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
-                    },
-                    "isotp_stmin": {
-                      "type": "number",
-                      "title": "ISO-TP STmin (ms)",
-                      "description": "Minimum separation time between consecutive frames",
-                      "minimum": 0,
-                      "maximum": 127,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0ms)"
-                    },
-                    "isotp_blocksize": {
-                      "type": "integer",
-                      "title": "ISO-TP Block Size",
-                      "description": "Number of consecutive frames before flow control",
-                      "minimum": 0,
-                      "maximum": 255,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0 = no limit)"
-                    },
-                    "isotp_tx_padding": {
-                      "type": "boolean",
-                      "title": "ISO-TP TX Padding",
-                      "description": "Pad transmitted frames to 8 bytes",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use python-can default (disabled)"
-                    },
-                    "isotp_rx_padding": {
-                      "type": "boolean",
-                      "title": "ISO-TP RX Padding",
-                      "description": "Expect padded received frames",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use python-can default (disabled)"
-                    },
-                    "isotp_padding_value": {
-                      "type": "integer",
-                      "title": "ISO-TP Padding Byte Value",
-                      "description": "Byte value used for padding (typically 0x00 or 0xCC)",
-                      "minimum": 0,
-                      "maximum": 255,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0x00)"
-                    },
-                    "use_external_sniffer": {
-                      "type": "boolean",
-                      "title": "External Sniffer Mode",
-                      "description": "Optimize for passive sniffing (disables TX)",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use default (disabled)"
+                      "default": 5.0,
+                      "ui:help": "Extended timeout for flash/programming operations"
                     },
                     "config_json": {
                       "type": "string",
@@ -563,7 +419,7 @@
             "tx_id": {
               "type": "string",
               "title": "TX CAN ID (hex)",
-              "description": "CAN ID for outgoing requests (tester→ECU)",
+              "description": "CAN ID for outgoing requests (tester->ECU)",
               "default": "0x7E0",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E0",
@@ -572,7 +428,7 @@
             "rx_id": {
               "type": "string",
               "title": "RX CAN ID (hex)",
-              "description": "CAN ID for incoming responses (ECU→tester)",
+              "description": "CAN ID for incoming responses (ECU->tester)",
               "default": "0x7E8",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E8",
@@ -592,7 +448,7 @@
             },
             "show_advanced": {
               "type": "boolean",
-              "title": "Advanced Settings",
+              "title": "Show Advanced Settings",
               "description": "Show advanced timeout and protocol settings",
               "default": false,
               "ui:widget": "toggle"
@@ -629,8 +485,8 @@
                       "description": "Maximum time to wait for UDS response",
                       "minimum": 0.1,
                       "maximum": 30.0,
-                      "ui:placeholder": "5.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                      "default": 5.0,
+                      "ui:help": "Total timeout for complete request/response cycle"
                     },
                     "p2_timeout": {
                       "type": "number",
@@ -638,8 +494,8 @@
                       "description": "Default P2 timeout per ISO 14229",
                       "minimum": 0.05,
                       "maximum": 5.0,
-                      "ui:placeholder": "1.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 1.0s)"
+                      "default": 1.0,
+                      "ui:help": "Time for ECU to start sending response"
                     },
                     "p2_star_timeout": {
                       "type": "number",
@@ -647,56 +503,8 @@
                       "description": "Enhanced P2 timeout for long operations",
                       "minimum": 1.0,
                       "maximum": 60.0,
-                      "ui:placeholder": "5.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
-                    },
-                    "isotp_stmin": {
-                      "type": "number",
-                      "title": "ISO-TP STmin (ms)",
-                      "description": "Minimum separation time between consecutive frames",
-                      "minimum": 0,
-                      "maximum": 127,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0ms)"
-                    },
-                    "isotp_blocksize": {
-                      "type": "integer",
-                      "title": "ISO-TP Block Size",
-                      "description": "Number of consecutive frames before flow control",
-                      "minimum": 0,
-                      "maximum": 255,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0 = no limit)"
-                    },
-                    "isotp_tx_padding": {
-                      "type": "boolean",
-                      "title": "ISO-TP TX Padding",
-                      "description": "Pad transmitted frames to 8 bytes",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use python-can default (disabled)"
-                    },
-                    "isotp_rx_padding": {
-                      "type": "boolean",
-                      "title": "ISO-TP RX Padding",
-                      "description": "Expect padded received frames",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use python-can default (disabled)"
-                    },
-                    "isotp_padding_value": {
-                      "type": "integer",
-                      "title": "ISO-TP Padding Byte Value",
-                      "description": "Byte value used for padding (typically 0x00 or 0xCC)",
-                      "minimum": 0,
-                      "maximum": 255,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0x00)"
-                    },
-                    "use_external_sniffer": {
-                      "type": "boolean",
-                      "title": "External Sniffer Mode",
-                      "description": "Optimize for passive sniffing (disables TX)",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use default (disabled)"
+                      "default": 5.0,
+                      "ui:help": "Extended timeout for flash/programming operations"
                     },
                     "config_json": {
                       "type": "string",
@@ -720,7 +528,7 @@
             "tx_id": {
               "type": "string",
               "title": "TX CAN ID (hex)",
-              "description": "CAN ID for outgoing requests (tester→ECU)",
+              "description": "CAN ID for outgoing requests (tester->ECU)",
               "default": "0x7E0",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E0",
@@ -729,7 +537,7 @@
             "rx_id": {
               "type": "string",
               "title": "RX CAN ID (hex)",
-              "description": "CAN ID for incoming responses (ECU→tester)",
+              "description": "CAN ID for incoming responses (ECU->tester)",
               "default": "0x7E8",
               "pattern": "^0x[0-9A-Fa-f]{1,3}$",
               "ui:placeholder": "0x7E8",
@@ -755,7 +563,7 @@
             },
             "show_advanced": {
               "type": "boolean",
-              "title": "Advanced Settings",
+              "title": "Show Advanced Settings",
               "description": "Show advanced timeout and protocol settings",
               "default": false,
               "ui:widget": "toggle"
@@ -791,8 +599,8 @@
                       "description": "Maximum time to wait for UDS response",
                       "minimum": 0.1,
                       "maximum": 30.0,
-                      "ui:placeholder": "5.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                      "default": 5.0,
+                      "ui:help": "Total timeout for complete request/response cycle"
                     },
                     "p2_timeout": {
                       "type": "number",
@@ -800,8 +608,8 @@
                       "description": "Default P2 timeout per ISO 14229",
                       "minimum": 0.05,
                       "maximum": 5.0,
-                      "ui:placeholder": "1.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 1.0s)"
+                      "default": 1.0,
+                      "ui:help": "Time for ECU to start sending response"
                     },
                     "p2_star_timeout": {
                       "type": "number",
@@ -809,56 +617,8 @@
                       "description": "Enhanced P2 timeout for long operations",
                       "minimum": 1.0,
                       "maximum": 60.0,
-                      "ui:placeholder": "5.0",
-                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
-                    },
-                    "isotp_stmin": {
-                      "type": "number",
-                      "title": "ISO-TP STmin (ms)",
-                      "description": "Minimum separation time between consecutive frames",
-                      "minimum": 0,
-                      "maximum": 127,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0ms)"
-                    },
-                    "isotp_blocksize": {
-                      "type": "integer",
-                      "title": "ISO-TP Block Size",
-                      "description": "Number of consecutive frames before flow control",
-                      "minimum": 0,
-                      "maximum": 255,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0 = no limit)"
-                    },
-                    "isotp_tx_padding": {
-                      "type": "boolean",
-                      "title": "ISO-TP TX Padding",
-                      "description": "Pad transmitted frames to 8 bytes",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use python-can default (disabled)"
-                    },
-                    "isotp_rx_padding": {
-                      "type": "boolean",
-                      "title": "ISO-TP RX Padding",
-                      "description": "Expect padded received frames",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use python-can default (disabled)"
-                    },
-                    "isotp_padding_value": {
-                      "type": "integer",
-                      "title": "ISO-TP Padding Byte Value",
-                      "description": "Byte value used for padding (typically 0x00 or 0xCC)",
-                      "minimum": 0,
-                      "maximum": 255,
-                      "ui:placeholder": "0",
-                      "ui:help": "Leave empty to use python-can default (0x00)"
-                    },
-                    "use_external_sniffer": {
-                      "type": "boolean",
-                      "title": "External Sniffer Mode",
-                      "description": "Optimize for passive sniffing (disables TX)",
-                      "ui:widget": "toggle",
-                      "ui:help": "Leave empty to use default (disabled)"
+                      "default": 5.0,
+                      "ui:help": "Extended timeout for flash/programming operations"
                     }
                   }
                 }
