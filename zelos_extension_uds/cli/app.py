@@ -62,17 +62,17 @@ def run_app_mode(file: Path | None) -> None:
 
         logger.info(f"Recording trace to: {output_file}")
 
-    # Initialize SDK with actions enabled
-    zelos_sdk.init(name="uds", log_level=log_level_str.lower(), actions=True)
-
     # Create UDS client (lazy import to avoid action decorator issues)
     from ..extension import UDSClient
 
     logger.info("Creating UDS client")
     client = UDSClient(config)
 
-    # Register actions for Zelos App
+    # Register actions for Zelos App BEFORE initializing SDK
     zelos_sdk.actions_registry.register(client, "uds_client")
+
+    # Initialize SDK with actions enabled
+    zelos_sdk.init(name="uds", log_level=log_level_str.lower(), actions=True)
 
     # Setup graceful shutdown
     setup_shutdown_handler(client)
