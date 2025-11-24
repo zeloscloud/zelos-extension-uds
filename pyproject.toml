@@ -1,6 +1,6 @@
 [project]
 name = "zelos-extension-uds"
-version = "0.1.1"
+version = "0.1.2"
 description = "Unified Diagnostic Services (UDS) extension for Zelos"
 authors = [{ name = "zelos", email = "info@zeloscloud.io" }]
 readme = "README.md"
