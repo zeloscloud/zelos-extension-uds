@@ -21,6 +21,7 @@ dependencies = [
     "zelos-sdk",
     "udsoncan>=1.21.0",
     "python-can>=4.0.0",
+    "can-isotp>=2.0.0",
     "rich-click>=1.8.0",
 ]
 
