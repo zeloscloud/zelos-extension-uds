@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import can
+import isotp
 import udsoncan
 import zelos_sdk
 from udsoncan.client import Client
@@ -81,6 +82,8 @@ class UDSClient:
         self.running = False
         self.client: Client | None = None
         self.bus: can.Bus | None = None
+        self.notifier: can.Notifier | None = None
+        self.isotp_stack: isotp.NotifierBasedCanStack | None = None
         self.connection: PythonIsoTpConnection | None = None
 
         # Metrics tracking
@@ -122,44 +125,34 @@ class UDSClient:
 
             logger.info(f"UDS addressing: TX=0x{tx_id:03X}, RX=0x{rx_id:03X}")
 
-            # Configure ISO-TP parameters (only if explicitly set by user)
-            isotp_params = {}
+            # Create ISO-TP addressing
+            tp_addr = isotp.Address(isotp.AddressingMode.Normal_11bits, txid=tx_id, rxid=rx_id)
 
-            # Only add ISO-TP parameters if user explicitly configured them
+            # Configure ISO-TP parameters
+            isotp_params = isotp.NotifierBasedCanStack.Params()
+
+            # Apply user-configured ISO-TP parameters if specified
             if "isotp_stmin" in self.config:
-                isotp_params["stmin"] = self.config["isotp_stmin"]
+                isotp_params.stmin = self.config["isotp_stmin"]
 
             if "isotp_blocksize" in self.config:
-                isotp_params["blocksize"] = self.config["isotp_blocksize"]
+                isotp_params.blocksize = self.config["isotp_blocksize"]
 
-            if "isotp_tx_padding" in self.config:
-                isotp_params["tx_padding"] = self.config["isotp_tx_padding"]
-
-            if "isotp_rx_padding" in self.config:
-                isotp_params["rx_padding"] = self.config["isotp_rx_padding"]
-
-            # Set padding byte value if padding is enabled and explicitly configured
-            if isotp_params.get("tx_padding") or isotp_params.get("rx_padding"):
-                isotp_params["tx_data_length"] = 8  # Full CAN frame
+            if "isotp_tx_padding" in self.config or "isotp_rx_padding" in self.config:
+                isotp_params.tx_data_length = 8  # Full CAN frame
+                if "isotp_tx_padding" in self.config:
+                    isotp_params.tx_padding = self.config["isotp_tx_padding"]
                 if "isotp_padding_value" in self.config:
-                    isotp_params["tx_padding_byte"] = self.config["isotp_padding_value"]
+                    isotp_params.tx_padding_byte = self.config["isotp_padding_value"]
 
-            # Create ISO-TP connection (with params only if any were configured)
-            if isotp_params:
-                logger.info(f"Using custom ISO-TP parameters: {isotp_params}")
-                self.connection = PythonIsoTpConnection(
-                    self.bus,
-                    rxid=rx_id,
-                    txid=tx_id,
-                    params=isotp_params,
-                )
-            else:
-                # Use defaults from python-can
-                self.connection = PythonIsoTpConnection(
-                    self.bus,
-                    rxid=rx_id,
-                    txid=tx_id,
-                )
+            # Create notifier and ISO-TP stack
+            self.notifier = can.Notifier(self.bus, [])
+            self.isotp_stack = isotp.NotifierBasedCanStack(
+                bus=self.bus, notifier=self.notifier, address=tp_addr, params=isotp_params
+            )
+
+            # Create UDS connection wrapper
+            self.connection = PythonIsoTpConnection(self.isotp_stack)
 
             # Configure UDS client (start with library defaults)
             config = udsoncan.configs.default_client_config.copy()
@@ -204,6 +197,22 @@ class UDSClient:
             except Exception as e:
                 logger.warning(f"Error closing ISO-TP connection: {e}")
             self.connection = None
+
+        # Stop ISO-TP stack
+        if self.isotp_stack:
+            try:
+                self.isotp_stack.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping ISO-TP stack: {e}")
+            self.isotp_stack = None
+
+        # Stop notifier
+        if self.notifier:
+            try:
+                self.notifier.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping notifier: {e}")
+            self.notifier = None
 
         # Close CAN bus
         if self.bus:
