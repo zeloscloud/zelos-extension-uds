@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - uses: extractions/setup-just@v3
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Verify version matches manifest files
+        run: |
+          TAG_VERSION="${{ steps.version.outputs.VERSION }}"
+
+          # Check extension.toml version
+          EXTENSION_VERSION=$(uv run python -c "import tomllib; print(tomllib.load(open('extension.toml','rb'))['version'])")
+          if [ "$EXTENSION_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: extension.toml version ($EXTENSION_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "✓ extension.toml version matches: $EXTENSION_VERSION"
+
+          # Check pyproject.toml version
+          PYPROJECT_VERSION=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "$PYPROJECT_VERSION" != "$TAG_VERSION" ]; then
+            echo "Error: pyproject.toml version ($PYPROJECT_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "✓ pyproject.toml version matches: $PYPROJECT_VERSION"
+
+      - name: Install dependencies
+        run: just ci-install
+
+      - name: Run linting
+        run: just check
+
+      - name: Run tests
+        run: just test
+
+      - name: Package extension
+        run: just package
+
+      - name: Verify package was created
+        run: |
+          PACKAGE_FILE="*-v${{ steps.version.outputs.VERSION }}.tar.gz"
+          if ! ls $PACKAGE_FILE 1> /dev/null 2>&1; then
+            echo "Error: Package file not found: $PACKAGE_FILE"
+            exit 1
+          fi
+          echo "✓ Package created: $(ls $PACKAGE_FILE)"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2.4.1
+        with:
+          files: "*-v${{ steps.version.outputs.VERSION }}.tar.gz"
+          generate_release_notes: true
+          fail_on_unmatched_files: true

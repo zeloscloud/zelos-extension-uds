@@ -1,0 +1,872 @@
+{
+  "$comment": "This schema defines the configuration UI in Zelos App. See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/#configuration for full widget reference.",
+  "type": "object",
+  "title": "UDS Diagnostic Client Configuration",
+  "description": "Configure UDS diagnostic services over CAN with ISO-TP transport",
+  "properties": {
+    "interface": {
+      "type": "string",
+      "title": "CAN Interface",
+      "description": "CAN interface type (e.g. Linux: socketcan, macOS/Windows: pcan)",
+      "enum": [
+        "socketcan",
+        "pcan",
+        "kvaser",
+        "vector",
+        "other"
+      ]
+    }
+  },
+  "required": [
+    "interface"
+  ],
+  "dependencies": {
+    "interface": {
+      "oneOf": [
+        {
+          "properties": {
+            "interface": {
+              "enum": [
+
+              ]
+            },
+            "channel": {
+              "type": "string",
+              "title": "Channel",
+              "description": "CAN channel identifier",
+              "default": "can0"
+            },
+            "tx_id": {
+              "type": "string",
+              "title": "TX CAN ID (hex)",
+              "description": "CAN ID for outgoing requests (tester→ECU)",
+              "default": "0x7E0",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "ui:placeholder": "0x7E0",
+              "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
+            },
+            "rx_id": {
+              "type": "string",
+              "title": "RX CAN ID (hex)",
+              "description": "CAN ID for incoming responses (ECU→tester)",
+              "default": "0x7E8",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "ui:placeholder": "0x7E8",
+              "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
+            },
+            "log_level": {
+              "type": "string",
+              "title": "Log Level",
+              "description": "Set the logging verbosity level",
+              "enum": [
+                "DEBUG",
+                "INFO",
+                "WARNING",
+                "ERROR"
+              ],
+              "default": "INFO"
+            },
+            "show_advanced": {
+              "type": "boolean",
+              "title": "Advanced Settings",
+              "description": "Show advanced timeout and protocol settings",
+              "default": false,
+              "ui:widget": "toggle"
+            }
+          },
+          "required": [
+            "channel",
+            "tx_id",
+            "rx_id"
+          ],
+          "dependencies": {
+            "show_advanced": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "show_advanced": {
+                      "enum": [
+                        false
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "show_advanced": {
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "request_timeout": {
+                      "type": "number",
+                      "title": "Request Timeout (seconds)",
+                      "description": "Maximum time to wait for UDS response",
+                      "minimum": 0.1,
+                      "maximum": 30.0,
+                      "ui:placeholder": "5.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                    },
+                    "p2_timeout": {
+                      "type": "number",
+                      "title": "P2 Timeout (seconds)",
+                      "description": "Default P2 timeout per ISO 14229",
+                      "minimum": 0.05,
+                      "maximum": 5.0,
+                      "ui:placeholder": "1.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 1.0s)"
+                    },
+                    "p2_star_timeout": {
+                      "type": "number",
+                      "title": "P2* Enhanced Timeout (seconds)",
+                      "description": "Enhanced P2 timeout for long operations",
+                      "minimum": 1.0,
+                      "maximum": 60.0,
+                      "ui:placeholder": "5.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                    },
+                    "isotp_stmin": {
+                      "type": "number",
+                      "title": "ISO-TP STmin (ms)",
+                      "description": "Minimum separation time between consecutive frames",
+                      "minimum": 0,
+                      "maximum": 127,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0ms)"
+                    },
+                    "isotp_blocksize": {
+                      "type": "integer",
+                      "title": "ISO-TP Block Size",
+                      "description": "Number of consecutive frames before flow control",
+                      "minimum": 0,
+                      "maximum": 255,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0 = no limit)"
+                    },
+                    "isotp_tx_padding": {
+                      "type": "boolean",
+                      "title": "ISO-TP TX Padding",
+                      "description": "Pad transmitted frames to 8 bytes",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use python-can default (disabled)"
+                    },
+                    "isotp_rx_padding": {
+                      "type": "boolean",
+                      "title": "ISO-TP RX Padding",
+                      "description": "Expect padded received frames",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use python-can default (disabled)"
+                    },
+                    "isotp_padding_value": {
+                      "type": "integer",
+                      "title": "ISO-TP Padding Byte Value",
+                      "description": "Byte value used for padding (typically 0x00 or 0xCC)",
+                      "minimum": 0,
+                      "maximum": 255,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0x00)"
+                    },
+                    "use_external_sniffer": {
+                      "type": "boolean",
+                      "title": "External Sniffer Mode",
+                      "description": "Optimize for passive sniffing (disables TX)",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use default (disabled)"
+                    },
+                    "config_json": {
+                      "type": "string",
+                      "title": "Advanced Configuration (JSON)",
+                      "description": "Additional python-can Bus() kwargs as JSON object",
+                      "ui:help": "Example: {\"fd\": true, \"data_bitrate\": 2000000}"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "interface": {
+              "enum": [
+                "pcan"
+              ]
+            },
+            "channel": {
+              "type": "string",
+              "title": "Channel",
+              "description": "CAN channel identifier",
+              "default": "PCAN_USBBUS1"
+            },
+            "bitrate": {
+              "type": "integer",
+              "title": "Bitrate (bps)",
+              "description": "CAN bus bitrate",
+              "enum": [
+                125000,
+                250000,
+                500000,
+                1000000
+              ],
+              "default": 500000
+            },
+            "tx_id": {
+              "type": "string",
+              "title": "TX CAN ID (hex)",
+              "description": "CAN ID for outgoing requests (tester→ECU)",
+              "default": "0x7E0",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "ui:placeholder": "0x7E0",
+              "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
+            },
+            "rx_id": {
+              "type": "string",
+              "title": "RX CAN ID (hex)",
+              "description": "CAN ID for incoming responses (ECU→tester)",
+              "default": "0x7E8",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "ui:placeholder": "0x7E8",
+              "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
+            },
+            "log_level": {
+              "type": "string",
+              "title": "Log Level",
+              "description": "Set the logging verbosity level",
+              "enum": [
+                "DEBUG",
+                "INFO",
+                "WARNING",
+                "ERROR"
+              ],
+              "default": "INFO"
+            },
+            "show_advanced": {
+              "type": "boolean",
+              "title": "Advanced Settings",
+              "description": "Show advanced timeout and protocol settings",
+              "default": false,
+              "ui:widget": "toggle"
+            }
+          },
+          "required": [
+            "channel",
+            "bitrate",
+            "tx_id",
+            "rx_id"
+          ],
+          "dependencies": {
+            "show_advanced": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "show_advanced": {
+                      "enum": [
+                        false
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "show_advanced": {
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "request_timeout": {
+                      "type": "number",
+                      "title": "Request Timeout (seconds)",
+                      "description": "Maximum time to wait for UDS response",
+                      "minimum": 0.1,
+                      "maximum": 30.0,
+                      "ui:placeholder": "5.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                    },
+                    "p2_timeout": {
+                      "type": "number",
+                      "title": "P2 Timeout (seconds)",
+                      "description": "Default P2 timeout per ISO 14229",
+                      "minimum": 0.05,
+                      "maximum": 5.0,
+                      "ui:placeholder": "1.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 1.0s)"
+                    },
+                    "p2_star_timeout": {
+                      "type": "number",
+                      "title": "P2* Enhanced Timeout (seconds)",
+                      "description": "Enhanced P2 timeout for long operations",
+                      "minimum": 1.0,
+                      "maximum": 60.0,
+                      "ui:placeholder": "5.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                    },
+                    "isotp_stmin": {
+                      "type": "number",
+                      "title": "ISO-TP STmin (ms)",
+                      "description": "Minimum separation time between consecutive frames",
+                      "minimum": 0,
+                      "maximum": 127,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0ms)"
+                    },
+                    "isotp_blocksize": {
+                      "type": "integer",
+                      "title": "ISO-TP Block Size",
+                      "description": "Number of consecutive frames before flow control",
+                      "minimum": 0,
+                      "maximum": 255,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0 = no limit)"
+                    },
+                    "isotp_tx_padding": {
+                      "type": "boolean",
+                      "title": "ISO-TP TX Padding",
+                      "description": "Pad transmitted frames to 8 bytes",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use python-can default (disabled)"
+                    },
+                    "isotp_rx_padding": {
+                      "type": "boolean",
+                      "title": "ISO-TP RX Padding",
+                      "description": "Expect padded received frames",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use python-can default (disabled)"
+                    },
+                    "isotp_padding_value": {
+                      "type": "integer",
+                      "title": "ISO-TP Padding Byte Value",
+                      "description": "Byte value used for padding (typically 0x00 or 0xCC)",
+                      "minimum": 0,
+                      "maximum": 255,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0x00)"
+                    },
+                    "use_external_sniffer": {
+                      "type": "boolean",
+                      "title": "External Sniffer Mode",
+                      "description": "Optimize for passive sniffing (disables TX)",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use default (disabled)"
+                    },
+                    "config_json": {
+                      "type": "string",
+                      "title": "Advanced Configuration (JSON)",
+                      "description": "Additional python-can Bus() kwargs as JSON object",
+                      "ui:help": "Example: {\"fd\": true, \"data_bitrate\": 2000000}"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "interface": {
+              "enum": [
+                "kvaser"
+              ]
+            },
+            "channel": {
+              "type": "string",
+              "title": "Channel",
+              "description": "CAN channel identifier",
+              "default": "0"
+            },
+            "bitrate": {
+              "type": "integer",
+              "title": "Bitrate (bps)",
+              "description": "CAN bus bitrate",
+              "enum": [
+                125000,
+                250000,
+                500000,
+                1000000
+              ],
+              "default": 500000
+            },
+            "tx_id": {
+              "type": "string",
+              "title": "TX CAN ID (hex)",
+              "description": "CAN ID for outgoing requests (tester→ECU)",
+              "default": "0x7E0",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "ui:placeholder": "0x7E0",
+              "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
+            },
+            "rx_id": {
+              "type": "string",
+              "title": "RX CAN ID (hex)",
+              "description": "CAN ID for incoming responses (ECU→tester)",
+              "default": "0x7E8",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "ui:placeholder": "0x7E8",
+              "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
+            },
+            "log_level": {
+              "type": "string",
+              "title": "Log Level",
+              "description": "Set the logging verbosity level",
+              "enum": [
+                "DEBUG",
+                "INFO",
+                "WARNING",
+                "ERROR"
+              ],
+              "default": "INFO"
+            },
+            "show_advanced": {
+              "type": "boolean",
+              "title": "Advanced Settings",
+              "description": "Show advanced timeout and protocol settings",
+              "default": false,
+              "ui:widget": "toggle"
+            }
+          },
+          "required": [
+            "channel",
+            "bitrate",
+            "tx_id",
+            "rx_id"
+          ],
+          "dependencies": {
+            "show_advanced": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "show_advanced": {
+                      "enum": [
+                        false
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "show_advanced": {
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "request_timeout": {
+                      "type": "number",
+                      "title": "Request Timeout (seconds)",
+                      "description": "Maximum time to wait for UDS response",
+                      "minimum": 0.1,
+                      "maximum": 30.0,
+                      "ui:placeholder": "5.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                    },
+                    "p2_timeout": {
+                      "type": "number",
+                      "title": "P2 Timeout (seconds)",
+                      "description": "Default P2 timeout per ISO 14229",
+                      "minimum": 0.05,
+                      "maximum": 5.0,
+                      "ui:placeholder": "1.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 1.0s)"
+                    },
+                    "p2_star_timeout": {
+                      "type": "number",
+                      "title": "P2* Enhanced Timeout (seconds)",
+                      "description": "Enhanced P2 timeout for long operations",
+                      "minimum": 1.0,
+                      "maximum": 60.0,
+                      "ui:placeholder": "5.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                    },
+                    "isotp_stmin": {
+                      "type": "number",
+                      "title": "ISO-TP STmin (ms)",
+                      "description": "Minimum separation time between consecutive frames",
+                      "minimum": 0,
+                      "maximum": 127,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0ms)"
+                    },
+                    "isotp_blocksize": {
+                      "type": "integer",
+                      "title": "ISO-TP Block Size",
+                      "description": "Number of consecutive frames before flow control",
+                      "minimum": 0,
+                      "maximum": 255,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0 = no limit)"
+                    },
+                    "isotp_tx_padding": {
+                      "type": "boolean",
+                      "title": "ISO-TP TX Padding",
+                      "description": "Pad transmitted frames to 8 bytes",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use python-can default (disabled)"
+                    },
+                    "isotp_rx_padding": {
+                      "type": "boolean",
+                      "title": "ISO-TP RX Padding",
+                      "description": "Expect padded received frames",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use python-can default (disabled)"
+                    },
+                    "isotp_padding_value": {
+                      "type": "integer",
+                      "title": "ISO-TP Padding Byte Value",
+                      "description": "Byte value used for padding (typically 0x00 or 0xCC)",
+                      "minimum": 0,
+                      "maximum": 255,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0x00)"
+                    },
+                    "use_external_sniffer": {
+                      "type": "boolean",
+                      "title": "External Sniffer Mode",
+                      "description": "Optimize for passive sniffing (disables TX)",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use default (disabled)"
+                    },
+                    "config_json": {
+                      "type": "string",
+                      "title": "Advanced Configuration (JSON)",
+                      "description": "Additional python-can Bus() kwargs as JSON object",
+                      "ui:help": "Example: {\"fd\": true, \"data_bitrate\": 2000000}"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "interface": {
+              "enum": [
+                "vector"
+              ]
+            },
+            "channel": {
+              "type": "string",
+              "title": "Channel",
+              "description": "CAN channel identifier",
+              "default": "0"
+            },
+            "bitrate": {
+              "type": "integer",
+              "title": "Bitrate (bps)",
+              "description": "CAN bus bitrate",
+              "enum": [
+                125000,
+                250000,
+                500000,
+                1000000
+              ],
+              "default": 500000
+            },
+            "tx_id": {
+              "type": "string",
+              "title": "TX CAN ID (hex)",
+              "description": "CAN ID for outgoing requests (tester→ECU)",
+              "default": "0x7E0",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "ui:placeholder": "0x7E0",
+              "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
+            },
+            "rx_id": {
+              "type": "string",
+              "title": "RX CAN ID (hex)",
+              "description": "CAN ID for incoming responses (ECU→tester)",
+              "default": "0x7E8",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "ui:placeholder": "0x7E8",
+              "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
+            },
+            "log_level": {
+              "type": "string",
+              "title": "Log Level",
+              "description": "Set the logging verbosity level",
+              "enum": [
+                "DEBUG",
+                "INFO",
+                "WARNING",
+                "ERROR"
+              ],
+              "default": "INFO"
+            },
+            "show_advanced": {
+              "type": "boolean",
+              "title": "Advanced Settings",
+              "description": "Show advanced timeout and protocol settings",
+              "default": false,
+              "ui:widget": "toggle"
+            }
+          },
+          "required": [
+            "channel",
+            "bitrate",
+            "tx_id",
+            "rx_id"
+          ],
+          "dependencies": {
+            "show_advanced": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "show_advanced": {
+                      "enum": [
+                        false
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "show_advanced": {
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "request_timeout": {
+                      "type": "number",
+                      "title": "Request Timeout (seconds)",
+                      "description": "Maximum time to wait for UDS response",
+                      "minimum": 0.1,
+                      "maximum": 30.0,
+                      "ui:placeholder": "5.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                    },
+                    "p2_timeout": {
+                      "type": "number",
+                      "title": "P2 Timeout (seconds)",
+                      "description": "Default P2 timeout per ISO 14229",
+                      "minimum": 0.05,
+                      "maximum": 5.0,
+                      "ui:placeholder": "1.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 1.0s)"
+                    },
+                    "p2_star_timeout": {
+                      "type": "number",
+                      "title": "P2* Enhanced Timeout (seconds)",
+                      "description": "Enhanced P2 timeout for long operations",
+                      "minimum": 1.0,
+                      "maximum": 60.0,
+                      "ui:placeholder": "5.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                    },
+                    "isotp_stmin": {
+                      "type": "number",
+                      "title": "ISO-TP STmin (ms)",
+                      "description": "Minimum separation time between consecutive frames",
+                      "minimum": 0,
+                      "maximum": 127,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0ms)"
+                    },
+                    "isotp_blocksize": {
+                      "type": "integer",
+                      "title": "ISO-TP Block Size",
+                      "description": "Number of consecutive frames before flow control",
+                      "minimum": 0,
+                      "maximum": 255,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0 = no limit)"
+                    },
+                    "isotp_tx_padding": {
+                      "type": "boolean",
+                      "title": "ISO-TP TX Padding",
+                      "description": "Pad transmitted frames to 8 bytes",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use python-can default (disabled)"
+                    },
+                    "isotp_rx_padding": {
+                      "type": "boolean",
+                      "title": "ISO-TP RX Padding",
+                      "description": "Expect padded received frames",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use python-can default (disabled)"
+                    },
+                    "isotp_padding_value": {
+                      "type": "integer",
+                      "title": "ISO-TP Padding Byte Value",
+                      "description": "Byte value used for padding (typically 0x00 or 0xCC)",
+                      "minimum": 0,
+                      "maximum": 255,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0x00)"
+                    },
+                    "use_external_sniffer": {
+                      "type": "boolean",
+                      "title": "External Sniffer Mode",
+                      "description": "Optimize for passive sniffing (disables TX)",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use default (disabled)"
+                    },
+                    "config_json": {
+                      "type": "string",
+                      "title": "Advanced Configuration (JSON)",
+                      "description": "Additional python-can Bus() kwargs as JSON object",
+                      "ui:help": "Example: {\"fd\": true, \"data_bitrate\": 2000000}"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "interface": {
+              "enum": [
+                "other"
+              ]
+            },
+            "tx_id": {
+              "type": "string",
+              "title": "TX CAN ID (hex)",
+              "description": "CAN ID for outgoing requests (tester→ECU)",
+              "default": "0x7E0",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "ui:placeholder": "0x7E0",
+              "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
+            },
+            "rx_id": {
+              "type": "string",
+              "title": "RX CAN ID (hex)",
+              "description": "CAN ID for incoming responses (ECU→tester)",
+              "default": "0x7E8",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "ui:placeholder": "0x7E8",
+              "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
+            },
+            "config_json": {
+              "type": "string",
+              "title": "CAN Configuration (JSON)",
+              "description": "Complete python-can Bus() kwargs as JSON. Must include 'interface' and 'channel' keys.",
+              "ui:help": "Example: {\"interface\": \"slcan\", \"channel\": \"/dev/ttyUSB0\", \"bitrate\": 500000}"
+            },
+            "log_level": {
+              "type": "string",
+              "title": "Log Level",
+              "description": "Set the logging verbosity level",
+              "enum": [
+                "DEBUG",
+                "INFO",
+                "WARNING",
+                "ERROR"
+              ],
+              "default": "INFO"
+            },
+            "show_advanced": {
+              "type": "boolean",
+              "title": "Advanced Settings",
+              "description": "Show advanced timeout and protocol settings",
+              "default": false,
+              "ui:widget": "toggle"
+            }
+          },
+          "required": [
+            "config_json",
+            "tx_id",
+            "rx_id"
+          ],
+          "dependencies": {
+            "show_advanced": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "show_advanced": {
+                      "enum": [
+                        false
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "show_advanced": {
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "request_timeout": {
+                      "type": "number",
+                      "title": "Request Timeout (seconds)",
+                      "description": "Maximum time to wait for UDS response",
+                      "minimum": 0.1,
+                      "maximum": 30.0,
+                      "ui:placeholder": "5.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                    },
+                    "p2_timeout": {
+                      "type": "number",
+                      "title": "P2 Timeout (seconds)",
+                      "description": "Default P2 timeout per ISO 14229",
+                      "minimum": 0.05,
+                      "maximum": 5.0,
+                      "ui:placeholder": "1.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 1.0s)"
+                    },
+                    "p2_star_timeout": {
+                      "type": "number",
+                      "title": "P2* Enhanced Timeout (seconds)",
+                      "description": "Enhanced P2 timeout for long operations",
+                      "minimum": 1.0,
+                      "maximum": 60.0,
+                      "ui:placeholder": "5.0",
+                      "ui:help": "Leave empty to use udsoncan default (typically 5.0s)"
+                    },
+                    "isotp_stmin": {
+                      "type": "number",
+                      "title": "ISO-TP STmin (ms)",
+                      "description": "Minimum separation time between consecutive frames",
+                      "minimum": 0,
+                      "maximum": 127,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0ms)"
+                    },
+                    "isotp_blocksize": {
+                      "type": "integer",
+                      "title": "ISO-TP Block Size",
+                      "description": "Number of consecutive frames before flow control",
+                      "minimum": 0,
+                      "maximum": 255,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0 = no limit)"
+                    },
+                    "isotp_tx_padding": {
+                      "type": "boolean",
+                      "title": "ISO-TP TX Padding",
+                      "description": "Pad transmitted frames to 8 bytes",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use python-can default (disabled)"
+                    },
+                    "isotp_rx_padding": {
+                      "type": "boolean",
+                      "title": "ISO-TP RX Padding",
+                      "description": "Expect padded received frames",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use python-can default (disabled)"
+                    },
+                    "isotp_padding_value": {
+                      "type": "integer",
+                      "title": "ISO-TP Padding Byte Value",
+                      "description": "Byte value used for padding (typically 0x00 or 0xCC)",
+                      "minimum": 0,
+                      "maximum": 255,
+                      "ui:placeholder": "0",
+                      "ui:help": "Leave empty to use python-can default (0x00)"
+                    },
+                    "use_external_sniffer": {
+                      "type": "boolean",
+                      "title": "External Sniffer Mode",
+                      "description": "Optimize for passive sniffing (disables TX)",
+                      "ui:widget": "toggle",
+                      "ui:help": "Leave empty to use default (disabled)"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
