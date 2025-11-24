@@ -2,7 +2,7 @@
 # See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/ for full documentation
 
 name = "Zelos UDS"
-version = "0.1.0"
+version = "0.1.1"
 description = "Unified Diagnostic Services (UDS) over CAN for automotive diagnostics"
 author = "Zelos"
 repository = "https://github.com/zeloscloud/zelos-extension-uds"
