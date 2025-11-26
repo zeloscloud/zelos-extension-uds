@@ -169,11 +169,6 @@ class UDSClient:
         self.config = config
         self.namespace = namespace
         self.running = False
-        self.client: Client | None = None
-        self.bus: can.Bus | None = None
-        self.notifier: can.Notifier | None = None
-        self.isotp_stack: isotp.NotifierBasedCanStack | None = None
-        self.connection: PythonIsoTpConnection | None = None
 
         # Metrics tracking
         self.metrics = Metrics()
@@ -181,8 +176,9 @@ class UDSClient:
         # Periodic tester present task (controlled by action, not config)
         self.tester_present_task: asyncio.Task | None = None
         self.tester_present_interval: float = 0  # Disabled by default
-        self.current_tx_id: int | None = None  # Track current TX ID
-        self.current_rx_id: int | None = None  # Track current RX ID
+        self.tester_present_tx_id: int | None = None  # Track TP TX ID
+        self.tester_present_rx_id: int | None = None  # Track TP RX ID
+        self.tester_present_cleanup: dict[str, Any] | None = None  # TP resources to clean up
 
         # Create trace source (in isolated namespace if provided)
         if self.namespace:
@@ -193,27 +189,18 @@ class UDSClient:
         self._define_schema()
 
     def start(self) -> None:
-        """Start UDS client and connect to CAN bus."""
+        """Start UDS client - validates config without creating connections."""
         logger.info("Starting UDS client")
 
         try:
-            # Create CAN bus interface
+            # Validate config has required fields
             interface = self.config.get("interface", "socketcan")
             channel = self.config.get("channel", "vcan0")
-            bitrate = self.config.get("bitrate")
 
-            logger.info(f"Connecting to CAN bus: interface={interface}, channel={channel}")
+            logger.info(f"UDS client configured: interface={interface}, channel={channel}")
+            logger.info("Connections will be created on-demand for each transaction")
 
-            bus_kwargs: dict[str, Any] = {"interface": interface, "channel": channel}
-            if bitrate:
-                bus_kwargs["bitrate"] = bitrate
-
-            self.bus = can.Bus(**bus_kwargs)
-
-            # TX/RX IDs are optional in config - will be specified per-action or use global defaults
-            # Connection will be created on first action
             self.running = True
-            logger.info("UDS client started (connection will be created on first action)")
 
         except Exception as e:
             logger.error(f"Failed to start UDS client: {e}")
@@ -225,161 +212,114 @@ class UDSClient:
         logger.info("Stopping UDS client")
         self.running = False
 
-        # Cancel periodic tester present
+        # Cancel periodic tester present (which will clean up its own connection)
+        self.tester_present_interval = 0
         if self.tester_present_task:
             self.tester_present_task.cancel()
             self.tester_present_task = None
 
-        # Close UDS client
-        if self.connection:
-            try:
-                self.connection.close()
-            except Exception as e:
-                logger.warning(f"Error closing ISO-TP connection: {e}")
-            self.connection = None
+        self.tester_present_tx_id = None
+        self.tester_present_rx_id = None
 
-        # Stop ISO-TP stack
-        if self.isotp_stack:
-            try:
-                self.isotp_stack.stop()
-            except Exception as e:
-                logger.warning(f"Error stopping ISO-TP stack: {e}")
-            self.isotp_stack = None
-
-        # Stop notifier
-        if self.notifier:
-            try:
-                self.notifier.stop()
-            except Exception as e:
-                logger.warning(f"Error stopping notifier: {e}")
-            self.notifier = None
-
-        # Close CAN bus
-        if self.bus:
-            try:
-                self.bus.shutdown()
-            except Exception as e:
-                logger.warning(f"Error shutting down CAN bus: {e}")
-            self.bus = None
-
-        self.client = None
         logger.info("UDS client stopped")
 
     def run(self) -> None:
-        """Main event loop with optional periodic tester present."""
-        asyncio.run(self._run_async())
+        """Main event loop - no longer needed with on-demand connections.
 
-    async def _run_async(self) -> None:
-        """Async event loop for UDS operations."""
-        try:
-            # Start periodic tester present if configured
-            if self.tester_present_interval > 0:
-                logger.info(f"Starting periodic tester present: {self.tester_present_interval}s")
-                self.tester_present_task = asyncio.create_task(self._periodic_tester_present())
-
-            # Main loop - just keep alive
-            while self.running:
-                await asyncio.sleep(1.0)
-
-        except asyncio.CancelledError:
-            logger.info("UDS client loop cancelled")
-        finally:
-            if self.tester_present_task:
-                self.tester_present_task.cancel()
+        UDS actions now create connections on-demand. Periodic tester present
+        is managed via the periodic_tester_present() action.
+        This method is kept for compatibility but does nothing.
+        """
+        logger.info("UDS client running (on-demand mode - no persistent connections)")
+        # No event loop needed - SDK manages async runtime
+        # Actions create connections on-demand
+        # Periodic TP is managed via action
 
     async def _periodic_tester_present(self) -> None:
-        """Send periodic tester present messages on the stored TX/RX IDs."""
-        # Ensure connection is set to the stored IDs
-        if self.current_tx_id is not None and self.current_rx_id is not None:
-            self._setup_connection_with_ids(self.current_tx_id, self.current_rx_id)
+        """Send periodic tester present messages with dedicated CAN bus connection.
 
-        while self.running:
-            try:
-                await asyncio.sleep(self.tester_present_interval)
+        This background task maintains its own long-lived CAN bus connection
+        for the duration of the periodic TP session.
+        """
+        if self.tester_present_tx_id is None or self.tester_present_rx_id is None:
+            logger.error("Periodic TP: TX/RX IDs not set")
+            return
 
-                if not self.running or not self.client:
+        # Create dedicated UDS client for periodic TP
+        try:
+            tp_client, self.tester_present_cleanup = self._create_uds_client(
+                self.tester_present_tx_id, self.tester_present_rx_id
+            )
+            logger.debug(
+                f"Periodic TP: Created connection TX=0x{self.tester_present_tx_id:03X}, "
+                f"RX=0x{self.tester_present_rx_id:03X}"
+            )
+        except Exception as e:
+            logger.error(f"Periodic TP: Failed to create connection: {e}")
+            return
+
+        try:
+            while self.running and self.tester_present_interval > 0:
+                try:
+                    await asyncio.sleep(self.tester_present_interval)
+
+                    if not self.running or self.tester_present_interval == 0:
+                        break
+
+                    # Send tester present with suppressed response (fire-and-forget)
+                    # This matches the reference implementation pattern
+                    with tp_client.suppress_positive_response(wait_nrc=False):
+                        tp_client.tester_present()
+
+                    logger.debug("Periodic tester present sent (suppressed response)")
+
+                except asyncio.CancelledError:
+                    logger.info("Periodic tester present cancelled")
                     break
+                except Exception as e:
+                    logger.warning(f"Periodic tester present error: {e}")
 
-                # Verify we're still using the correct IDs
-                if self.current_tx_id is not None and self.current_rx_id is not None:
-                    self._setup_connection_with_ids(self.current_tx_id, self.current_rx_id)
-
-                # Send tester present (suppress positive response)
-                response = self.client.tester_present(suppress_positive_response=True)
-
-                if response:
-                    logger.debug("Tester present sent")
-
-            except asyncio.CancelledError:
-                logger.info("Periodic tester present cancelled")
-                break
-            except Exception as e:
-                logger.warning(f"Periodic tester present error: {e}")
+        finally:
+            # Clean up dedicated TP connection
+            if self.tester_present_cleanup:
+                logger.debug("Periodic TP: Cleaning up connection")
+                self._cleanup_uds_client(self.tester_present_cleanup)
+                self.tester_present_cleanup = None
 
     # ========== HELPERS ==========
 
-    def _resolve_tx_rx_ids(
-        self, tx_id: str | None = None, rx_id: str | None = None
-    ) -> tuple[int, int] | dict[str, str]:
-        """Resolve TX/RX IDs from action parameters or global config.
+    def _create_uds_client(self, tx_id: int, rx_id: int) -> tuple[Client, dict[str, Any]]:
+        """Create a UDS client on-demand for a single transaction.
 
-        :param tx_id: Optional action-specific TX ID (hex string)
-        :param rx_id: Optional action-specific RX ID (hex string)
-        :return: Tuple of (tx_id_int, rx_id_int) or error dict
-        """
-        # Try action-specific TX ID first
-        if tx_id:
-            tx_id_int = validate_hex_id(tx_id, max_value=0x7FF)
-            if isinstance(tx_id_int, dict):
-                return {"error": f"Invalid TX ID: {tx_id_int['error']}"}
-        else:
-            # Fall back to global config
-            tx_id_int = self.config.get("tx_id")
-            if tx_id_int is None:
-                return {"error": "No TX ID specified (provide in action or global config)"}
-
-        # Try action-specific RX ID first
-        if rx_id:
-            rx_id_int = validate_hex_id(rx_id, max_value=0x7FF)
-            if isinstance(rx_id_int, dict):
-                return {"error": f"Invalid RX ID: {rx_id_int['error']}"}
-        else:
-            # Fall back to global config
-            rx_id_int = self.config.get("rx_id")
-            if rx_id_int is None:
-                return {"error": "No RX ID specified (provide in action or global config)"}
-
-        return (tx_id_int, rx_id_int)
-
-    def _setup_connection_with_ids(self, tx_id: int, rx_id: int) -> None:
-        """Setup or reconfigure ISO-TP connection with specific TX/RX IDs.
+        Creates: CAN bus → Notifier → ISO-TP stack → Connection → UDS Client
+        Returns the client and a cleanup dictionary for resource disposal.
 
         :param tx_id: Transmit CAN ID (tester→ECU)
         :param rx_id: Receive CAN ID (ECU→tester)
+        :return: Tuple of (UDS client, cleanup dict with resources to clean up)
         """
-        # Check if IDs match current connection
-        if self.isotp_stack and hasattr(self.isotp_stack, "address"):
-            current_addr = self.isotp_stack.address
-            if (
-                hasattr(current_addr, "txid")
-                and current_addr.txid == tx_id
-                and hasattr(current_addr, "rxid")
-                and current_addr.rxid == rx_id
-            ):
-                # Already configured correctly
-                return
+        # Determine if we need 29-bit addressing
+        # Use 29-bit if: explicitly configured OR either ID exceeds 11-bit range
+        use_extended = self.config.get("extended_id", False) or tx_id > 0x7FF or rx_id > 0x7FF
+        id_bits = 29 if use_extended else 11
+        logger.debug(f"Creating UDS client: TX=0x{tx_id:X}, RX=0x{rx_id:X} ({id_bits}-bit)")
 
-            # IDs changed - update the address
-            logger.debug(f"Updating connection IDs: TX=0x{tx_id:03X}, RX=0x{rx_id:03X}")
-            new_addr = isotp.Address(isotp.AddressingMode.Normal_11bits, txid=tx_id, rxid=rx_id)
-            self.isotp_stack.address = new_addr
-            return
+        # Create CAN bus interface
+        interface = self.config.get("interface", "socketcan")
+        channel = self.config.get("channel", "vcan0")
+        bitrate = self.config.get("bitrate")
 
-        # First time setup
-        logger.debug(f"Setting up connection: TX=0x{tx_id:03X}, RX=0x{rx_id:03X}")
+        bus_kwargs: dict[str, Any] = {"interface": interface, "channel": channel}
+        if bitrate:
+            bus_kwargs["bitrate"] = bitrate
 
-        # Create new ISO-TP addressing
-        tp_addr = isotp.Address(isotp.AddressingMode.Normal_11bits, txid=tx_id, rxid=rx_id)
+        bus = can.Bus(**bus_kwargs)
+
+        # Create ISO-TP addressing (11-bit or 29-bit based on ID range or config)
+        if use_extended:
+            tp_addr = isotp.Address(isotp.AddressingMode.Normal_29bits, txid=tx_id, rxid=rx_id)
+        else:
+            tp_addr = isotp.Address(isotp.AddressingMode.Normal_11bits, txid=tx_id, rxid=rx_id)
 
         # Configure ISO-TP parameters
         isotp_params = {}
@@ -394,40 +334,125 @@ class UDSClient:
             if "isotp_padding_value" in self.config:
                 isotp_params["tx_padding_byte"] = self.config["isotp_padding_value"]
 
-        # Create notifier if it doesn't exist yet (first connection)
-        if not self.notifier:
-            self.notifier = can.Notifier(self.bus, [])
+        # Create notifier
+        notifier = can.Notifier(bus, [])
 
         # Create ISO-TP stack
-        self.isotp_stack = isotp.NotifierBasedCanStack(
-            bus=self.bus, notifier=self.notifier, address=tp_addr, params=isotp_params
+        isotp_stack = isotp.NotifierBasedCanStack(
+            bus=bus, notifier=notifier, address=tp_addr, params=isotp_params
         )
 
         # Create connection
-        self.connection = PythonIsoTpConnection(self.isotp_stack)
+        connection = PythonIsoTpConnection(isotp_stack)
 
-        # Create or update client
-        if not self.client:
-            # First time - create client with configuration
-            config = udsoncan.configs.default_client_config.copy()
-            config["data_identifiers"] = {"default": HexDidCodec}
-            config["input_output"] = {}
+        # Create client with configuration
+        config = udsoncan.configs.default_client_config.copy()
+        config["data_identifiers"] = {"default": HexDidCodec}
+        config["input_output"] = {}
 
-            if "request_timeout" in self.config:
-                config["request_timeout"] = self.config["request_timeout"]
-            if "p2_timeout" in self.config:
-                config["p2_timeout"] = self.config["p2_timeout"]
-            if "p2_star_timeout" in self.config:
-                config["p2_star_timeout"] = self.config["p2_star_timeout"]
-            if "use_external_sniffer" in self.config:
-                config["use_external_sniffer"] = self.config["use_external_sniffer"]
+        if "request_timeout" in self.config:
+            config["request_timeout"] = self.config["request_timeout"]
+        if "p2_timeout" in self.config:
+            config["p2_timeout"] = self.config["p2_timeout"]
+        if "p2_star_timeout" in self.config:
+            config["p2_star_timeout"] = self.config["p2_star_timeout"]
+        if "use_external_sniffer" in self.config:
+            config["use_external_sniffer"] = self.config["use_external_sniffer"]
 
-            self.client = Client(self.connection, config=config)
-            self.client.open()
+        client = Client(connection, config=config)
+        client.open()
+
+        # Return client and cleanup resources
+        cleanup = {
+            "client": client,
+            "connection": connection,
+            "isotp_stack": isotp_stack,
+            "notifier": notifier,
+            "bus": bus,
+        }
+
+        return client, cleanup
+
+    def _cleanup_uds_client(self, cleanup: dict[str, Any]) -> None:
+        """Clean up resources from an on-demand UDS client.
+
+        :param cleanup: Dictionary with resources to clean up
+        """
+        # Close connection
+        if "connection" in cleanup and cleanup["connection"]:
+            try:
+                cleanup["connection"].close()
+            except Exception as e:
+                logger.debug(f"Error closing connection: {e}")
+
+        # Stop ISO-TP stack
+        if "isotp_stack" in cleanup and cleanup["isotp_stack"]:
+            try:
+                cleanup["isotp_stack"].stop()
+            except Exception as e:
+                logger.debug(f"Error stopping ISO-TP stack: {e}")
+
+        # Stop notifier
+        if "notifier" in cleanup and cleanup["notifier"]:
+            try:
+                cleanup["notifier"].stop()
+            except Exception as e:
+                logger.debug(f"Error stopping notifier: {e}")
+
+        # Close CAN bus
+        if "bus" in cleanup and cleanup["bus"]:
+            try:
+                cleanup["bus"].shutdown()
+            except Exception as e:
+                logger.debug(f"Error shutting down CAN bus: {e}")
+
+    def _resolve_tx_rx_ids(
+        self, tx_id: str | None = None, rx_id: str | None = None
+    ) -> tuple[int, int] | dict[str, str]:
+        """Resolve TX/RX IDs from action parameters or global config.
+
+        Supports both 11-bit (0x000-0x7FF) and 29-bit (0x000-0x1FFFFFFF) CAN IDs.
+        The addressing mode is automatically selected in _create_uds_client based
+        on whether IDs exceed 11-bit range or extended_id config is set.
+
+        :param tx_id: Optional action-specific TX ID (hex string)
+        :param rx_id: Optional action-specific RX ID (hex string)
+        :return: Tuple of (tx_id_int, rx_id_int) or error dict
+        """
+        # Max 29-bit CAN ID
+        max_can_id = 0x1FFFFFFF
+
+        # Try action-specific TX ID first
+        if tx_id:
+            tx_id_int = validate_hex_id(tx_id, max_value=max_can_id)
+            if isinstance(tx_id_int, dict):
+                return {"error": f"Invalid TX ID: {tx_id_int['error']}"}
         else:
-            # Update existing client connection
-            self.client.set_connection(self.connection)
-            self.client.open()
+            # Fall back to global config
+            tx_id_str = self.config.get("tx_id")
+            if tx_id_str is None:
+                return {"error": "No TX ID specified (provide in action or global config)"}
+            # Validate config value
+            tx_id_int = validate_hex_id(tx_id_str, max_value=max_can_id)
+            if isinstance(tx_id_int, dict):
+                return {"error": f"Invalid TX ID in config: {tx_id_int['error']}"}
+
+        # Try action-specific RX ID first
+        if rx_id:
+            rx_id_int = validate_hex_id(rx_id, max_value=max_can_id)
+            if isinstance(rx_id_int, dict):
+                return {"error": f"Invalid RX ID: {rx_id_int['error']}"}
+        else:
+            # Fall back to global config
+            rx_id_str = self.config.get("rx_id")
+            if rx_id_str is None:
+                return {"error": "No RX ID specified (provide in action or global config)"}
+            # Validate config value
+            rx_id_int = validate_hex_id(rx_id_str, max_value=max_can_id)
+            if isinstance(rx_id_int, dict):
+                return {"error": f"Invalid RX ID in config: {rx_id_int['error']}"}
+
+        return (tx_id_int, rx_id_int)
 
     # ========== ACTIONS ==========
 
@@ -437,15 +462,25 @@ class UDSClient:
 
         :return: Status dictionary with connection state and metrics
         """
+        # Get and format TX/RX IDs from config (they're stored as strings)
+        tx_id_str = self.config.get("tx_id")
+        rx_id_str = self.config.get("rx_id")
+
         return {
             "running": self.running,
-            "connected": self.client is not None and self.bus is not None,
-            "interface": self.config.get("interface", "unknown"),
-            "channel": self.config.get("channel", "unknown"),
-            "tx_id": format_hex_id(self.config.get("tx_id", 0), width=3),
-            "rx_id": format_hex_id(self.config.get("rx_id", 0), width=3),
+            "connection_mode": "on-demand (stateless)",
+            "interface": self.config.get("interface", "socketcan"),
+            "channel": self.config.get("channel", "vcan0"),
+            "default_tx_id": tx_id_str if tx_id_str else "not set",
+            "default_rx_id": rx_id_str if rx_id_str else "not set",
             "tester_present_active": self.tester_present_interval > 0,
             "tester_present_interval": self.tester_present_interval,
+            "tester_present_tx_id": format_hex_id(self.tester_present_tx_id, width=3)
+            if self.tester_present_tx_id
+            else None,
+            "tester_present_rx_id": format_hex_id(self.tester_present_rx_id, width=3)
+            if self.tester_present_rx_id
+            else None,
             "metrics": {
                 "requests_sent": self.metrics.requests_sent,
                 "responses_received": self.metrics.responses_received,
@@ -486,12 +521,14 @@ class UDSClient:
     ) -> dict[str, Any]:
         """Change diagnostic session using DiagnosticSessionControl service.
 
+        Creates on-demand CAN bus connection for this transaction.
+
         :param session_type: Type of session to activate
         :param tx_id: Optional TX ID (overrides global config)
         :param rx_id: Optional RX ID (overrides global config)
         :return: Response with status or error
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Resolve TX/RX IDs
@@ -499,9 +536,6 @@ class UDSClient:
         if isinstance(ids_result, dict):
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
-
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map session type to UDS session value
         session_type_map = {
@@ -519,11 +553,14 @@ class UDSClient:
         if session_value is None:
             return {"error": f"Unknown session type: {session_type}"}
 
+        client, cleanup = None, None
         try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
             start_time = time.time()
 
             logger.info(f"Changing diagnostic session to: {session_type}")
-            self.client.change_session(session_value)
+            client.change_session(session_value)
 
             elapsed_ms = (time.time() - start_time) * 1000
 
@@ -545,6 +582,9 @@ class UDSClient:
         except Exception as e:
             logger.error(f"Session control error: {e}")
             return {"error": str(e)}
+        finally:
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
 
     @action("Read Data By Identifier", "Read data from ECU by DID")
     @action.text(
@@ -572,13 +612,14 @@ class UDSClient:
         """Read data from ECU using ReadDataByIdentifier service.
 
         Uses udsoncan's codec architecture with HexDidCodec for dynamic DID reads.
+        Creates on-demand CAN bus connection for this transaction.
 
         :param did: Data Identifier as hex string
         :param tx_id: Optional TX ID (overrides global config)
         :param rx_id: Optional RX ID (overrides global config)
         :return: Response with data or error
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Resolve TX/RX IDs
@@ -587,15 +628,15 @@ class UDSClient:
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
 
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
-
         # Validate and parse DID
         did_int = validate_hex_id(did, max_value=0xFFFF)
         if isinstance(did_int, dict):
             return did_int
 
+        client, cleanup = None, None
         try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
             start_time = time.time()
 
             # Log TX event
@@ -603,7 +644,7 @@ class UDSClient:
 
             # Use udsoncan's standard read_data_by_identifier API
             # HexDidCodec is registered as default codec in client config
-            response = self.client.read_data_by_identifier([did_int])
+            response = client.read_data_by_identifier([did_int])
 
             elapsed = time.time() - start_time
 
@@ -637,6 +678,9 @@ class UDSClient:
         except Exception as e:
             logger.error(f"Read DID 0x{did_int:04X} error: {e}")
             return {"error": str(e)}
+        finally:
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
 
     @action("Write Data By Identifier", "Write data to ECU by DID")
     @action.text(
@@ -673,6 +717,7 @@ class UDSClient:
         """Write data to ECU using WriteDataByIdentifier service.
 
         Uses udsoncan's codec architecture with HexDidCodec for dynamic DID writes.
+        Creates on-demand CAN bus connection for this transaction.
 
         :param did: Data Identifier as hex string
         :param data: Data to write as hex string
@@ -680,7 +725,7 @@ class UDSClient:
         :param rx_id: Optional RX ID (overrides global config)
         :return: Response with status or error
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Resolve TX/RX IDs
@@ -688,9 +733,6 @@ class UDSClient:
         if isinstance(ids_result, dict):
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
-
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Validate and parse DID
         did_int = validate_hex_id(did, max_value=0xFFFF)
@@ -702,7 +744,13 @@ class UDSClient:
         if isinstance(data_bytes, dict):
             return data_bytes
 
+        # Create on-demand UDS client for this transaction
+        client = None
+        cleanup = None
+
         try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
             start_time = time.time()
 
             # Log TX event
@@ -710,7 +758,7 @@ class UDSClient:
 
             # Use udsoncan's standard write_data_by_identifier API
             # HexDidCodec is registered as default codec and accepts bytes directly
-            response = self.client.write_data_by_identifier(did_int, data_bytes)
+            response = client.write_data_by_identifier(did_int, data_bytes)
 
             elapsed = time.time() - start_time
 
@@ -743,6 +791,10 @@ class UDSClient:
         except Exception as e:
             logger.error(f"Write DID 0x{did_int:04X} error: {e}")
             return {"error": str(e)}
+        finally:
+            # Clean up on-demand resources
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
 
     @action("ECU Reset", "Reset the ECU")
     @action.select(
@@ -769,12 +821,14 @@ class UDSClient:
     def ecu_reset(self, reset_type: str, tx_id: str = "", rx_id: str = "") -> dict[str, Any]:
         """Perform ECU reset using ECUReset service.
 
+        Creates on-demand CAN bus connection for this transaction.
+
         :param reset_type: Type of reset ("Hard Reset", "Soft Reset", "Key Off On Reset")
         :param tx_id: Optional TX ID (overrides global config)
         :param rx_id: Optional RX ID (overrides global config)
         :return: Response with status or error
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Resolve TX/RX IDs
@@ -782,9 +836,6 @@ class UDSClient:
         if isinstance(ids_result, dict):
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
-
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map reset type to UDS reset type value
         reset_type_map = {
@@ -796,14 +847,20 @@ class UDSClient:
         if reset_type not in reset_type_map:
             return {"error": f"Invalid reset type: {reset_type}"}
 
+        # Create on-demand UDS client for this transaction
+        client = None
+        cleanup = None
+
         try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
             start_time = time.time()
 
             # Log TX event
             self._log_uds_tx(self.SID_ECU_RESET, reset_type_map[reset_type], None)
 
             # Send UDS request
-            response = self.client.ecu_reset(reset_type_map[reset_type])
+            response = client.ecu_reset(reset_type_map[reset_type])
 
             elapsed = time.time() - start_time
 
@@ -838,6 +895,10 @@ class UDSClient:
         except Exception as e:
             logger.error(f"ECU reset error: {e}")
             return {"error": str(e)}
+        finally:
+            # Clean up on-demand resources
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
 
     @action("Routine Control", "Control diagnostic routines")
     @action.select(
@@ -880,6 +941,8 @@ class UDSClient:
     ) -> dict[str, Any]:
         """Control diagnostic routine using RoutineControl service.
 
+        Creates on-demand CAN bus connection for this transaction.
+
         :param control_type: Control operation type
         :param routine_id: Routine identifier as hex string
         :param data: Optional data as hex string
@@ -887,7 +950,7 @@ class UDSClient:
         :param rx_id: Optional RX ID (overrides global config)
         :return: Response with routine results or error
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Resolve TX/RX IDs
@@ -895,9 +958,6 @@ class UDSClient:
         if isinstance(ids_result, dict):
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
-
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map control type to UDS control type value
         control_type_map = {
@@ -921,11 +981,17 @@ class UDSClient:
             if isinstance(data_bytes, dict):
                 return data_bytes
 
+        # Create on-demand UDS client for this transaction
+        client = None
+        cleanup = None
+
         try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
             start_time = time.time()
 
             # Send UDS request
-            response = self.client.routine_control(
+            response = client.routine_control(
                 control_type_map[control_type], routine_id_int, data=data_bytes
             )
 
@@ -957,6 +1023,10 @@ class UDSClient:
         except Exception as e:
             logger.error(f"Routine control error: {e}")
             return {"error": str(e)}
+        finally:
+            # Clean up on-demand resources
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
 
     @action("Input Output Control", "Control input/output signals")
     @action.text(
@@ -1016,7 +1086,7 @@ class UDSClient:
         :param rx_id: Optional RX ID (overrides global config)
         :return: Response with status or error
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Resolve TX/RX IDs
@@ -1024,9 +1094,6 @@ class UDSClient:
         if isinstance(ids_result, dict):
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
-
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map control parameter to UDS control parameter value
         control_param_map = {
@@ -1057,11 +1124,17 @@ class UDSClient:
             if isinstance(control_option_bytes, dict):
                 return control_option_bytes
 
+        # Create on-demand UDS client for this transaction
+        client = None
+        cleanup = None
+
         try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
             start_time = time.time()
 
             # Send UDS request
-            response = self.client.io_control(
+            response = client.io_control(
                 did_int,
                 control_param_map[control_parameter],
                 values=list(control_option_bytes) if control_option_bytes else None,
@@ -1086,12 +1159,16 @@ class UDSClient:
         except Exception as e:
             logger.error(f"IO control error: {e}")
             return {"error": str(e)}
+        finally:
+            # Clean up on-demand resources
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
 
     @action("Tester Present", "Send tester present message")
     @action.boolean(
         "suppress_response",
         title="Suppress Positive Response",
-        description="Suppress positive response from ECU",
+        description="Don't wait for ECU response (fire-and-forget)",
         default=False,
         widget="toggle",
     )
@@ -1114,12 +1191,14 @@ class UDSClient:
     ) -> dict[str, Any]:
         """Send tester present message using TesterPresent service.
 
-        :param suppress_response: Whether to suppress positive response
+        Creates on-demand CAN bus connection for this transaction.
+
+        :param suppress_response: If True, suppress positive response (fire-and-forget)
         :param tx_id: Optional TX ID (overrides global config)
         :param rx_id: Optional RX ID (overrides global config)
         :return: Response with status or error
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Resolve TX/RX IDs
@@ -1128,17 +1207,34 @@ class UDSClient:
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
 
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
+        # Create on-demand UDS client for this transaction
+        client = None
+        cleanup = None
 
         try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
             start_time = time.time()
 
             # Log TX event
             self._log_uds_tx(self.SID_TESTER_PRESENT, 0, None)
 
-            # Send UDS request
-            response = self.client.tester_present(suppress_positive_response=suppress_response)
+            # Send UDS request with optional suppress positive response
+            if suppress_response:
+                # Use context manager to suppress positive response (fire-and-forget)
+                with client.suppress_positive_response(wait_nrc=False):
+                    client.tester_present()
+                elapsed = time.time() - start_time
+                # Log RX event (no response expected)
+                self._log_uds_rx(self.SID_TESTER_PRESENT, 0, None, True, elapsed)
+                return {
+                    "status": "success",
+                    "suppress_response": True,
+                    "elapsed_ms": round(elapsed * 1000, 2),
+                }
+
+            # Normal request with response expected
+            response = client.tester_present()
 
             elapsed = time.time() - start_time
 
@@ -1155,13 +1251,16 @@ class UDSClient:
 
             return {
                 "status": "success",
-                "suppress_response": suppress_response,
                 "elapsed_ms": round(elapsed * 1000, 2),
             }
 
         except Exception as e:
             logger.error(f"Tester present error: {e}")
             return {"error": str(e)}
+        finally:
+            # Clean up on-demand resources
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
 
     @action("Periodic Tester Present", "Start/stop periodic tester present")
     @action.boolean(
@@ -1209,7 +1308,7 @@ class UDSClient:
         :param rx_id: Optional RX ID (overrides global config)
         :return: Status dictionary
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Stop requested
@@ -1217,13 +1316,16 @@ class UDSClient:
             if self.tester_present_interval == 0:
                 return {"message": "Periodic tester present not active"}
 
+            # Stop the interval (the background task will clean up its own connection)
+            self.tester_present_interval = 0
+
+            # Cancel the background task
             if self.tester_present_task:
                 self.tester_present_task.cancel()
                 self.tester_present_task = None
 
-            self.tester_present_interval = 0
-            self.current_tx_id = None
-            self.current_rx_id = None
+            self.tester_present_tx_id = None
+            self.tester_present_rx_id = None
             logger.info("Stopped periodic tester present")
 
             return {
@@ -1237,18 +1339,17 @@ class UDSClient:
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
 
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
-
-        # Cancel existing task if running
+        # Cancel existing task if running (will clean up its own connection)
         if self.tester_present_task and not self.tester_present_task.done():
             logger.info("Cancelling existing periodic tester present")
+            # Stop the interval first so the task exits
+            self.tester_present_interval = 0
             self.tester_present_task.cancel()
             self.tester_present_task = None
 
         # Store TX/RX IDs for this tester present session
-        self.current_tx_id = resolved_tx_id
-        self.current_rx_id = resolved_rx_id
+        self.tester_present_tx_id = resolved_tx_id
+        self.tester_present_rx_id = resolved_rx_id
         self.tester_present_interval = interval
 
         logger.info(
@@ -1256,7 +1357,7 @@ class UDSClient:
             f"TX=0x{resolved_tx_id:03X}, RX=0x{resolved_rx_id:03X}"
         )
 
-        # Create background task
+        # Create background task (which will create its own connection)
         self.tester_present_task = asyncio.create_task(self._periodic_tester_present())
 
         return {
@@ -1309,7 +1410,7 @@ class UDSClient:
         :param rx_id: Optional RX ID (overrides global config)
         :return: Response with DTCs or error
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Resolve TX/RX IDs
@@ -1317,9 +1418,6 @@ class UDSClient:
         if isinstance(ids_result, dict):
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
-
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map status mask to values
         status_mask_map = {
@@ -1336,13 +1434,19 @@ class UDSClient:
 
         mask_value = status_mask_map.get(status_mask, 0xFF)
 
+        # Create on-demand UDS client for this transaction
+        client = None
+        cleanup = None
+
         try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
             start_time = time.time()
 
             logger.info(f"Reading DTCs with status mask: {status_mask} (0x{mask_value:02X})")
 
             # Use udsoncan's get_dtc_by_status_mask
-            response = self.client.get_dtc_by_status_mask(mask_value)
+            response = client.get_dtc_by_status_mask(mask_value)
 
             elapsed_ms = (time.time() - start_time) * 1000
 
@@ -1380,6 +1484,10 @@ class UDSClient:
         except Exception as e:
             logger.error(f"Read DTC error: {e}")
             return {"error": str(e)}
+        finally:
+            # Clean up on-demand resources
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
 
     @action("Clear Diagnostic Information", "Clear diagnostic trouble codes")
     @action.text(
@@ -1413,7 +1521,7 @@ class UDSClient:
         :param rx_id: Optional RX ID (overrides global config)
         :return: Success status or error
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Resolve TX/RX IDs
@@ -1422,24 +1530,27 @@ class UDSClient:
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
 
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
+        # Parse group mask
+        group_bytes = parse_hex_string(group)
+        if isinstance(group_bytes, dict):
+            return {"error": f"Invalid group format: {group_bytes['error']}"}
+
+        if len(group_bytes) != 3:
+            return {"error": f"Group must be 3 bytes, got {len(group_bytes)}"}
+
+        group_int = int.from_bytes(group_bytes, byteorder="big")
+
+        # Create on-demand UDS client for this transaction
+        client = None
+        cleanup = None
 
         try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
             start_time = time.time()
 
-            # Parse group mask
-            group_bytes = parse_hex_string(group)
-            if isinstance(group_bytes, dict):
-                return {"error": f"Invalid group format: {group_bytes['error']}"}
-
-            if len(group_bytes) != 3:
-                return {"error": f"Group must be 3 bytes, got {len(group_bytes)}"}
-
-            group_int = int.from_bytes(group_bytes, byteorder="big")
-
             logger.info(f"Clearing DTCs for group: 0x{group_int:06X}")
-            self.client.clear_dtc(group_int)
+            client.clear_dtc(group_int)
 
             elapsed_ms = (time.time() - start_time) * 1000
 
@@ -1461,6 +1572,10 @@ class UDSClient:
         except Exception as e:
             logger.error(f"Clear DTC error: {e}")
             return {"error": str(e)}
+        finally:
+            # Clean up on-demand resources
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
 
     @action("Security Access", "Request security access")
     @action.select(
@@ -1502,7 +1617,7 @@ class UDSClient:
         :param rx_id: Optional RX ID (overrides global config)
         :return: Response with seed/status or error
         """
-        if not self.client:
+        if not self.running:
             return {"error": "UDS client not started"}
 
         # Resolve TX/RX IDs
@@ -1510,9 +1625,6 @@ class UDSClient:
         if isinstance(ids_result, dict):
             return ids_result
         resolved_tx_id, resolved_rx_id = ids_result
-
-        # Setup connection with resolved IDs
-        self._setup_connection_with_ids(resolved_tx_id, resolved_rx_id)
 
         # Map access level to request/send key sub-functions
         # Odd = request seed, Even = send key
@@ -1525,13 +1637,19 @@ class UDSClient:
 
         base_level = level_map.get(access_level, 1)
 
+        # Create on-demand UDS client for this transaction
+        client = None
+        cleanup = None
+
         try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
             start_time = time.time()
 
             if not key:
                 # Request seed
                 logger.info(f"Requesting security seed for {access_level}")
-                response = self.client.request_seed(base_level)
+                response = client.request_seed(base_level)
 
                 elapsed_ms = (time.time() - start_time) * 1000
 
@@ -1558,7 +1676,7 @@ class UDSClient:
                     return {"error": f"Invalid key format: {key_bytes['error']}"}
 
                 logger.info(f"Sending security key for {access_level}")
-                response = self.client.send_key(base_level + 1, key_bytes)
+                response = client.send_key(base_level + 1, key_bytes)
 
                 elapsed_ms = (time.time() - start_time) * 1000
 
@@ -1582,6 +1700,504 @@ class UDSClient:
         except Exception as e:
             logger.error(f"Security access error: {e}")
             return {"error": str(e)}
+        finally:
+            # Clean up on-demand resources
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
+
+    # ========== FLASH / TRANSFER ACTIONS ==========
+
+    @action("Request Download", "Initiate firmware download to ECU")
+    @action.text(
+        "address",
+        title="Memory Address (hex)",
+        description="Target memory address (e.g., 0x08000000)",
+        placeholder="0x08000000",
+        default="0x00000000",
+    )
+    @action.text(
+        "size",
+        title="Data Size (bytes)",
+        description="Size of data to be transferred",
+        placeholder="1024",
+        default="1024",
+    )
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def request_download(
+        self, address: str, size: str, tx_id: str = "", rx_id: str = ""
+    ) -> dict[str, Any]:
+        """Initiate firmware download using RequestDownload service (0x34).
+
+        :param address: Target memory address (hex string)
+        :param size: Data size in bytes
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
+        :return: Response with max_block_size or error
+        """
+        if not self.running:
+            return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Parse address
+        address_int = validate_hex_id(address, max_value=0xFFFFFFFF)
+        if isinstance(address_int, dict):
+            return {"error": f"Invalid address: {address_int['error']}"}
+
+        # Parse size
+        try:
+            size_int = int(size)
+            if size_int <= 0:
+                return {"error": "Size must be positive"}
+        except ValueError:
+            return {"error": f"Invalid size: {size}"}
+
+        client, cleanup = None, None
+        try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
+            start_time = time.time()
+
+            from udsoncan.common.MemoryLocation import MemoryLocation
+
+            location = MemoryLocation(address=address_int, memorysize=size_int, address_format=32)
+            logger.info(f"Requesting download: address=0x{address_int:08X}, size={size_int}")
+
+            response = client.request_download(location)
+
+            elapsed_ms = (time.time() - start_time) * 1000
+
+            max_length = (
+                response.service_data.max_length
+                if hasattr(response.service_data, "max_length")
+                else 0
+            )
+
+            logger.info(f"Download accepted. Max block size: {max_length}")
+
+            return {
+                "status": "success",
+                "address": f"0x{address_int:08X}",
+                "size": size_int,
+                "max_block_size": max_length,
+                "elapsed_ms": round(elapsed_ms, 2),
+            }
+
+        except NegativeResponseException as e:
+            nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
+            logger.error(f"Request download NRC: {nrc_name} (0x{e.response.code:02X})")
+            return {"error": f"NRC: {nrc_name} (0x{e.response.code:02X})"}
+        except TimeoutException:
+            logger.error("Request download timeout")
+            return {"error": "Timeout waiting for response"}
+        except Exception as e:
+            logger.error(f"Request download error: {e}")
+            return {"error": str(e)}
+        finally:
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
+
+    @action("Transfer Data", "Transfer a block of data to ECU")
+    @action.text(
+        "sequence",
+        title="Sequence Number",
+        description="Block sequence number (0-255)",
+        placeholder="1",
+        default="1",
+    )
+    @action.text(
+        "data",
+        title="Data (hex bytes)",
+        description="Data block to transfer (e.g., 01 02 03 04)",
+        placeholder="00 11 22 33",
+        default="00",
+    )
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def transfer_data(
+        self, sequence: str, data: str, tx_id: str = "", rx_id: str = ""
+    ) -> dict[str, Any]:
+        """Transfer data block using TransferData service (0x36).
+
+        :param sequence: Block sequence number (0-255)
+        :param data: Data to transfer as hex string
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
+        :return: Response with status or error
+        """
+        if not self.running:
+            return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Parse sequence number
+        try:
+            seq_int = int(sequence)
+            if seq_int < 0 or seq_int > 255:
+                return {"error": "Sequence must be 0-255"}
+        except ValueError:
+            return {"error": f"Invalid sequence: {sequence}"}
+
+        # Parse data
+        data_bytes = parse_hex_string(data)
+        if isinstance(data_bytes, dict):
+            return data_bytes
+
+        client, cleanup = None, None
+        try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
+            start_time = time.time()
+
+            logger.info(f"Transferring block {seq_int}: {len(data_bytes)} bytes")
+
+            client.transfer_data(seq_int, data_bytes)
+
+            elapsed_ms = (time.time() - start_time) * 1000
+
+            return {
+                "status": "success",
+                "sequence": seq_int,
+                "bytes_transferred": len(data_bytes),
+                "elapsed_ms": round(elapsed_ms, 2),
+            }
+
+        except NegativeResponseException as e:
+            nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
+            logger.error(f"Transfer data NRC: {nrc_name} (0x{e.response.code:02X})")
+            return {"error": f"NRC: {nrc_name} (0x{e.response.code:02X})"}
+        except TimeoutException:
+            logger.error("Transfer data timeout")
+            return {"error": "Timeout waiting for response"}
+        except Exception as e:
+            logger.error(f"Transfer data error: {e}")
+            return {"error": str(e)}
+        finally:
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
+
+    @action("Request Transfer Exit", "Finalize firmware transfer")
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def request_transfer_exit(self, tx_id: str = "", rx_id: str = "") -> dict[str, Any]:
+        """Finalize transfer using RequestTransferExit service (0x37).
+
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
+        :return: Response with status or error
+        """
+        if not self.running:
+            return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        client, cleanup = None, None
+        try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
+            start_time = time.time()
+
+            logger.info("Requesting transfer exit")
+
+            client.request_transfer_exit()
+
+            elapsed_ms = (time.time() - start_time) * 1000
+
+            logger.info("Transfer exit successful")
+
+            return {
+                "status": "success",
+                "elapsed_ms": round(elapsed_ms, 2),
+            }
+
+        except NegativeResponseException as e:
+            nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
+            logger.error(f"Transfer exit NRC: {nrc_name} (0x{e.response.code:02X})")
+            return {"error": f"NRC: {nrc_name} (0x{e.response.code:02X})"}
+        except TimeoutException:
+            logger.error("Transfer exit timeout")
+            return {"error": "Timeout waiting for response"}
+        except Exception as e:
+            logger.error(f"Transfer exit error: {e}")
+            return {"error": str(e)}
+        finally:
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
+
+    @action("Flash Firmware", "Flash firmware file to ECU")
+    @action.text(
+        "address",
+        title="Memory Address (hex)",
+        description="Target memory address (e.g., 0x08000000)",
+        placeholder="0x08000000",
+        default="0x00000000",
+    )
+    @action.text(
+        "data",
+        title="Firmware Data (hex bytes)",
+        description="Firmware data as hex string",
+        placeholder="00 11 22 33 44 55",
+        default="",
+    )
+    @action.number(
+        "block_size",
+        minimum=8,
+        maximum=4095,
+        default=256,
+        title="Block Size (bytes)",
+        description="Transfer block size (0 = auto-negotiate)",
+        widget="number",
+    )
+    @action.boolean(
+        "change_session",
+        title="Change to Programming Session",
+        description="Switch to programming session before flash",
+        default=True,
+        widget="toggle",
+    )
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+    )
+    def flash_firmware(
+        self,
+        address: str,
+        data: str,
+        block_size: int = 256,
+        change_session: bool = True,
+        tx_id: str = "",
+        rx_id: str = "",
+    ) -> dict[str, Any]:
+        """Flash firmware to ECU using stateless UDS transactions.
+
+        Executes the full flash sequence:
+        1. Change to programming session (optional)
+        2. Request download
+        3. Transfer data blocks
+        4. Request transfer exit
+
+        Note: For long transfers, start periodic tester present before flashing
+        to prevent S3 timeout.
+
+        :param address: Target memory address (hex string)
+        :param data: Firmware data as hex string
+        :param block_size: Block size for transfer (0 = auto-negotiate)
+        :param change_session: Whether to change to programming session first
+        :param tx_id: Optional TX ID (overrides global config)
+        :param rx_id: Optional RX ID (overrides global config)
+        :return: Response with flash status or error
+        """
+        if not self.running:
+            return {"error": "UDS client not started"}
+
+        # Resolve TX/RX IDs
+        ids_result = self._resolve_tx_rx_ids(tx_id if tx_id else None, rx_id if rx_id else None)
+        if isinstance(ids_result, dict):
+            return ids_result
+        resolved_tx_id, resolved_rx_id = ids_result
+
+        # Parse address
+        address_int = validate_hex_id(address, max_value=0xFFFFFFFF)
+        if isinstance(address_int, dict):
+            return {"error": f"Invalid address: {address_int['error']}"}
+
+        # Parse firmware data
+        if not data.strip():
+            return {"error": "No firmware data provided"}
+
+        firmware_bytes = parse_hex_string(data)
+        if isinstance(firmware_bytes, dict):
+            return {"error": f"Invalid firmware data: {firmware_bytes['error']}"}
+
+        if len(firmware_bytes) == 0:
+            return {"error": "Firmware data is empty"}
+
+        logger.info(
+            f"Starting flash: address=0x{address_int:08X}, "
+            f"size={len(firmware_bytes)} bytes, block_size={block_size}"
+        )
+
+        start_time = time.time()
+
+        # Step 1: Change session (optional)
+        if change_session:
+            result = self.diagnostic_session_control(
+                session_type="Programming Session", tx_id=tx_id, rx_id=rx_id
+            )
+            if "error" in result:
+                return {"error": f"Session change failed: {result['error']}"}
+            logger.info("Changed to programming session")
+
+        # Step 2: Request download
+        client, cleanup = None, None
+        try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+
+            from udsoncan.common.MemoryLocation import MemoryLocation
+
+            location = MemoryLocation(
+                address=address_int, memorysize=len(firmware_bytes), address_format=32
+            )
+            response = client.request_download(location)
+
+            # Use server-provided block size if auto-negotiate
+            max_block_size = (
+                response.service_data.max_length
+                if hasattr(response.service_data, "max_length")
+                else block_size
+            )
+            if block_size == 0 or block_size > max_block_size:
+                block_size = max_block_size
+
+            logger.info(f"Download accepted. Using block size: {block_size}")
+
+        except NegativeResponseException as e:
+            nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
+            return {"error": f"Request download failed: NRC {nrc_name} (0x{e.response.code:02X})"}
+        except TimeoutException:
+            return {"error": "Request download timeout"}
+        except Exception as e:
+            return {"error": f"Request download failed: {e}"}
+        finally:
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
+
+        # Step 3: Transfer data blocks
+        total_blocks = (len(firmware_bytes) + block_size - 1) // block_size
+        logger.info(f"Transferring {len(firmware_bytes)} bytes in {total_blocks} blocks")
+
+        sequence = 1
+        offset = 0
+        blocks_transferred = 0
+
+        while offset < len(firmware_bytes):
+            block = firmware_bytes[offset : offset + block_size]
+
+            client, cleanup = None, None
+            try:
+                client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+                client.transfer_data(sequence, block)
+                blocks_transferred += 1
+
+                if blocks_transferred % 10 == 0:
+                    logger.info(f"Transferred {blocks_transferred}/{total_blocks} blocks")
+
+            except NegativeResponseException as e:
+                nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
+                return {
+                    "error": f"Transfer failed at block {sequence}: "
+                    f"NRC {nrc_name} (0x{e.response.code:02X})",
+                    "blocks_transferred": blocks_transferred,
+                }
+            except TimeoutException:
+                return {
+                    "error": f"Transfer timeout at block {sequence}",
+                    "blocks_transferred": blocks_transferred,
+                }
+            except Exception as e:
+                return {
+                    "error": f"Transfer failed at block {sequence}: {e}",
+                    "blocks_transferred": blocks_transferred,
+                }
+            finally:
+                if cleanup:
+                    self._cleanup_uds_client(cleanup)
+
+            sequence = (sequence + 1) % 256
+            offset += block_size
+
+        logger.info(f"All {total_blocks} blocks transferred")
+
+        # Step 4: Request transfer exit
+        client, cleanup = None, None
+        try:
+            client, cleanup = self._create_uds_client(resolved_tx_id, resolved_rx_id)
+            client.request_transfer_exit()
+            logger.info("Transfer exit successful")
+
+        except NegativeResponseException as e:
+            nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
+            return {
+                "error": f"Transfer exit failed: NRC {nrc_name} (0x{e.response.code:02X})",
+                "blocks_transferred": blocks_transferred,
+            }
+        except TimeoutException:
+            return {"error": "Transfer exit timeout", "blocks_transferred": blocks_transferred}
+        except Exception as e:
+            return {"error": f"Transfer exit failed: {e}", "blocks_transferred": blocks_transferred}
+        finally:
+            if cleanup:
+                self._cleanup_uds_client(cleanup)
+
+        elapsed_ms = (time.time() - start_time) * 1000
+
+        return {
+            "status": "success",
+            "address": f"0x{address_int:08X}",
+            "size": len(firmware_bytes),
+            "blocks": total_blocks,
+            "block_size": block_size,
+            "elapsed_ms": round(elapsed_ms, 2),
+        }
 
     # ========== TRACE SCHEMA & LOGGING ==========
 
