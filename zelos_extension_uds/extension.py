@@ -224,16 +224,23 @@ class UDSClient:
         logger.info("UDS client stopped")
 
     def run(self) -> None:
-        """Main event loop - no longer needed with on-demand connections.
+        """Main event loop - blocks to keep the process alive for action serving.
 
-        UDS actions now create connections on-demand. Periodic tester present
-        is managed via the periodic_tester_present() action.
-        This method is kept for compatibility but does nothing.
+        UDS actions create connections on-demand. Periodic tester present
+        is managed via the periodic_tester_present() action which creates
+        async tasks in the event loop.
         """
         logger.info("UDS client running (on-demand mode - no persistent connections)")
-        # No event loop needed - SDK manages async runtime
-        # Actions create connections on-demand
-        # Periodic TP is managed via action
+        asyncio.run(self._run_async())
+
+    async def _run_async(self) -> None:
+        """Async event loop - keeps process alive and handles periodic tasks."""
+        try:
+            while self.running:
+                # Sleep and allow async tasks (like periodic tester present) to run
+                await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            logger.info("UDS event loop cancelled")
 
     async def _periodic_tester_present(self) -> None:
         """Send periodic tester present messages with dedicated CAN bus connection.
