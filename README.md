@@ -7,53 +7,9 @@ A Zelos extension implementing UDS (ISO 14229) diagnostic protocol over CAN with
 - **UDS Services**: Session Control, Read/Write Data By Identifier, ECU Reset, Routine Control, I/O Control, Tester Present, DTC Reading/Clearing, Security Access, Firmware Flashing
 - **CAN Integration**: ISO-TP transport, configurable interfaces (socketcan, PCAN, Kvaser, Vector)
 - **Zelos Integration**: Interactive actions via Zelos App
-- **CLI**: Execute UDS transactions programatically from the CLI
+- **CLI**: Execute UDS transactions programmatically from the CLI
 
-## CLI Examples
-
-```bash
-# Change to extended diagnostic session
-zelos-extension-uds session --txid 7E0 --rxid 7E8 --type extended
-
-# Read VIN (DID 0xF190)
-zelos-extension-uds read --txid 7E0 --rxid 7E8 --id F190
-
-# Write data
-zelos-extension-uds write --txid 7E0 --rxid 7E8 --id 1234 --data 01020304
-
-# Read DTCs
-zelos-extension-uds dtc --txid 7E0 --rxid 7E8
-
-# Clear DTCs
-zelos-extension-uds clear --txid 7E0 --rxid 7E8
-
-# Request security seed
-zelos-extension-uds security --txid 7E0 --rxid 7E8 --level 1 --seed
-
-# Send security key
-zelos-extension-uds security --txid 7E0 --rxid 7E8 --level 1 --key 01020304
-
-# ECU reset
-zelos-extension-uds reset --txid 7E0 --rxid 7E8 --response-required --type hard
-
-# Flash firmware
-zelos-extension-uds flash --txid 7E0 --rxid 7E8 --file firmware.bin --address 08000000
-
-# Start routine
-zelos-extension-uds routine --txid 7E0 --rxid 7E8 --id 0203 --control start --data 0102
-
-# I/O control
-zelos-extension-uds io --txid 7E0 --rxid 7E8 --id 1234 --control freeze
-
-# Tester present
-zelos-extension-uds tp --txid 7E0 --rxid 7E8
-```
-
-**Available subcommands:** `session`, `read`, `write`, `reset`, `routine`, `io`, `tp`, `dtc`, `clear`, `security`, `flash`
-
-All hex values accept formats: `7E0`, `0x7E0`, `01020304`, `0x01020304`
-
-### Configuration
+## Configuration
 
 Configure via Zelos App settings or `config.json`:
 
@@ -118,6 +74,54 @@ Supported services per ISO 14229:
 - [ISO 14229 Specification](https://www.iso.org/standard/72439.html)
 - [udsoncan Library](https://github.com/pylessard/python-udsoncan)
 - [python-can Documentation](https://python-can.readthedocs.io/)
+
+## CLI Usage
+
+The extension includes a command-line interface for executing UDS transactions. No installation required - just use `uv run`:
+
+> **Tip:** Run `pip install .` to install and use `zelos-extension-uds <args>` from anywhere.
+
+```bash
+# Change to extended diagnostic session
+uv run main.py session --txid 7E0 --rxid 7E8 --type extended
+
+# Read VIN (DID 0xF190)
+uv run main.py read --txid 7E0 --rxid 7E8 --id F190
+
+# Write data
+uv run main.py write --txid 7E0 --rxid 7E8 --id 1234 --data 01020304
+
+# Read DTCs
+uv run main.py dtc --txid 7E0 --rxid 7E8
+
+# Clear DTCs
+uv run main.py clear --txid 7E0 --rxid 7E8
+
+# Request security seed
+uv run main.py security --txid 7E0 --rxid 7E8 --level 1 --seed
+
+# Send security key
+uv run main.py security --txid 7E0 --rxid 7E8 --level 1 --key 01020304
+
+# ECU reset
+uv run main.py reset --txid 7E0 --rxid 7E8 --response-required --type hard
+
+# Flash firmware
+uv run main.py flash --txid 7E0 --rxid 7E8 --file firmware.bin --address 08000000
+
+# Start routine
+uv run main.py routine --txid 7E0 --rxid 7E8 --id 0203 --control start --data 0102
+
+# I/O control
+uv run main.py io --txid 7E0 --rxid 7E8 --id 1234 --control freeze
+
+# Tester present
+uv run main.py tp --txid 7E0 --rxid 7E8
+```
+
+**Available subcommands:** `session`, `read`, `write`, `reset`, `routine`, `io`, `tp`, `dtc`, `clear`, `security`, `flash`
+
+All hex values accept formats: `7E0`, `0x7E0`, `01020304`, `0x01020304`
 
 ## License
 
