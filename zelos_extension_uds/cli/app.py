@@ -26,18 +26,14 @@ def run_app_mode(file: Path | None) -> None:
     log_level_str = config.get("log_level", "INFO")
     try:
         log_level = getattr(logging, log_level_str)
-        logging.getLogger().setLevel(log_level)
-        logger.info(f"Log level set to: {log_level_str}")
-
-        # Enable library loggers for DEBUG level to get ISOTP frame-level logging
-        if log_level == logging.DEBUG:
-            logging.getLogger("udsoncan").setLevel(logging.DEBUG)
-            logging.getLogger("isotp").setLevel(logging.DEBUG)
-            logging.getLogger("can").setLevel(logging.DEBUG)
-            logger.debug("Enabled DEBUG logging for udsoncan, isotp, and can libraries")
     except AttributeError:
         logger.warning(f"Invalid log level '{log_level_str}', using INFO")
-        logging.getLogger().setLevel(logging.INFO)
+        log_level = logging.INFO
+
+    from zelos_extension_uds.logging import set_log_level
+
+    set_log_level(log_level)
+    logger.info(f"Log level set to: {log_level_str}")
 
     # Parse hex IDs from config (stored as strings)
     tx_id_str = config.get("tx_id", "0x7E0")

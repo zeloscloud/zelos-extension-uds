@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Zelos UDS extension - Unified Diagnostic Services over CAN."""
 
-import logging
 from pathlib import Path
 
 import rich_click as click
-from zelos_sdk.hooks.logging import TraceLoggingHandler
 
+import zelos_extension_uds.logging  # noqa: F401 - initializes logging
 from zelos_extension_uds import cli as cli_commands
 
 # Configure rich-click for better CLI UX
@@ -15,14 +14,6 @@ click.rich_click.USE_MARKDOWN = True
 click.rich_click.SHOW_ARGUMENTS = True
 click.rich_click.GROUP_ARGUMENTS_OPTIONS = True
 click.rich_click.STYLE_ERRORS_SUGGESTION = "yellow italic"
-
-# Configure logging - INFO level prevents debug logs from being sent to backend
-logging.basicConfig(level=logging.INFO)
-
-# Add the built-in handler to capture logs at INFO level and above
-handler = TraceLoggingHandler("uds_log")
-handler.setLevel(logging.INFO)
-logging.getLogger().addHandler(handler)
 
 
 @click.group(invoke_without_command=True)
