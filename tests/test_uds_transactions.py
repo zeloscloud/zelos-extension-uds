@@ -166,6 +166,16 @@ class MockUDSServer:
             logger.debug("Handling ECUReset")
             return self._handle_ecu_reset(request)
 
+        # RoutineControl (0x31)
+        elif service_id == 0x31:
+            logger.debug("Handling RoutineControl")
+            return self._handle_routine_control(request)
+
+        # InputOutputControlByIdentifier (0x2F)
+        elif service_id == 0x2F:
+            logger.debug("Handling InputOutputControlByIdentifier")
+            return self._handle_io_control(request)
+
         # Unsupported service - negative response
         logger.warning(f"Unsupported service: 0x{service_id:02X}")
         return bytes([0x7F, service_id, 0x11])  # serviceNotSupported
@@ -229,6 +239,30 @@ class MockUDSServer:
 
         # Positive response: 0x51 (0x11 + 0x40) + reset type
         return bytes([0x51, reset_type])
+
+    def _handle_routine_control(self, request: bytes) -> bytes:
+        """Handle RoutineControl request."""
+        if len(request) < 4:
+            return bytes([0x7F, 0x31, 0x13])  # incorrectMessageLengthOrInvalidFormat
+
+        control_type = request[1]
+        routine_id = (request[2] << 8) | request[3]
+        logger.info(f"RoutineControl: type=0x{control_type:02X}, routine_id=0x{routine_id:04X}")
+
+        # Positive response: 0x71 (0x31 + 0x40) + control_type + routine_id
+        return bytes([0x71, control_type, request[2], request[3]])
+
+    def _handle_io_control(self, request: bytes) -> bytes:
+        """Handle InputOutputControlByIdentifier request."""
+        if len(request) < 4:
+            return bytes([0x7F, 0x2F, 0x13])  # incorrectMessageLengthOrInvalidFormat
+
+        did = (request[1] << 8) | request[2]
+        control_param = request[3]
+        logger.info(f"IOControl: DID=0x{did:04X}, param=0x{control_param:02X}")
+
+        # Positive response: 0x6F (0x2F + 0x40) + DID + control_param
+        return bytes([0x6F, request[1], request[2], control_param])
 
 
 @pytest.fixture
@@ -361,3 +395,27 @@ def test_connection_cleanup_on_invalid_did(
     # Subsequent valid transaction should still work
     result2 = uds_client.read_data_by_identifier(did="0xF190")
     check.that(result2.get("status"), "==", "success")
+
+
+def test_routine_control(check, uds_server: MockUDSServer, uds_client: UDSClient) -> None:
+    """Test RoutineControl transaction."""
+    result = uds_client.routine_control(
+        routine_id="0x0203",
+        control_type="Start Routine",
+    )
+
+    check.that(result, "is instance of", dict)
+    check.that(result.get("status"), "==", "success")
+    check.that(result.get("routine_id"), "==", "0x0203")
+
+
+def test_io_control(check, uds_server: MockUDSServer, uds_client: UDSClient) -> None:
+    """Test InputOutputControlByIdentifier transaction."""
+    result = uds_client.input_output_control(
+        did="0x0100",
+        control_parameter="Return Control To ECU",
+    )
+
+    check.that(result, "is instance of", dict)
+    check.that(result.get("status"), "==", "success")
+    check.that(result.get("did"), "==", "0x0100")

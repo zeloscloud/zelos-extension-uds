@@ -355,7 +355,7 @@ class UDSClient:
         # Create client with configuration
         config = udsoncan.configs.default_client_config.copy()
         config["data_identifiers"] = {"default": HexDidCodec}
-        config["input_output"] = {}
+        config["input_output"] = {"default": {"codec": HexDidCodec}}
 
         if "request_timeout" in self.config:
             config["request_timeout"] = self.config["request_timeout"]
@@ -1008,7 +1008,7 @@ class UDSClient:
 
             # Send UDS request
             response = client.routine_control(
-                control_type_map[control_type], routine_id_int, data=data_bytes
+                routine_id_int, control_type_map[control_type], data=data_bytes
             )
 
             elapsed = time.time() - start_time

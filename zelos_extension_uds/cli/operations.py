@@ -291,7 +291,7 @@ def routine_control(
             + (f", data: {format_hex_string(data)}" if data else "")
         )
 
-        response = client.routine_control(control_type, routine_id, data)
+        response = client.routine_control(routine_id, control_type, data)
 
         response_data = format_hex_string(response.data) if response.data else ""
 
@@ -366,12 +366,11 @@ def input_output_control(
             + (f", option: {format_hex_string(control_option)}" if control_option else "")
         )
 
-        # Build the control parameter record
-        values = {"parameter": control_param}
-        if control_option:
-            values["mask"] = control_option
-
-        client.input_output_control_by_identifier(did, values=values)
+        client.io_control(
+            did,
+            control_param,
+            values=list(control_option) if control_option else None,
+        )
 
         logger.info("I/O control successful")
 
