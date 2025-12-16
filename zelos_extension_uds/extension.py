@@ -503,6 +503,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -510,6 +511,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.select(
         "session_type",
@@ -698,6 +700,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -705,6 +708,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "did",
@@ -812,6 +816,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -819,6 +824,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.select(
         "reset_type",
@@ -918,6 +924,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -925,6 +932,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.select(
         "control_type",
@@ -1051,6 +1059,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -1058,6 +1067,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "did",
@@ -1187,6 +1197,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -1194,6 +1205,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.boolean(
         "suppress_response",
@@ -1285,6 +1297,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -1292,6 +1305,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.boolean(
         "enabled",
@@ -1391,6 +1405,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -1398,6 +1413,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.select(
         "status_mask",
@@ -1512,6 +1528,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -1519,6 +1536,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "group",
@@ -1600,6 +1618,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -1607,6 +1626,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.select(
         "access_level",
@@ -1730,6 +1750,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -1737,6 +1758,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "address",
@@ -1837,6 +1859,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -1844,6 +1867,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "sequence",
@@ -1932,6 +1956,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -1939,6 +1964,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     def request_transfer_exit(self, tx_id: str = "", rx_id: str = "") -> dict[str, Any]:
         """Finalize transfer using RequestTransferExit service (0x37).
@@ -1996,6 +2022,7 @@ class UDSClient:
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "rx_id",
@@ -2003,6 +2030,7 @@ class UDSClient:
         description="CAN RX ID (overrides global, e.g., 0x7E8)",
         placeholder="",
         default="",
+        required=False,
     )
     @action.text(
         "address",
