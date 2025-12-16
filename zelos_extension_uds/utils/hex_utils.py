@@ -57,36 +57,39 @@ def format_hex_string(data: bytes, separator: str = " ", prefix: str = "") -> st
     return separator.join(hex_bytes)
 
 
-def validate_hex_id(hex_id_str: str, max_value: int = 0xFFFF) -> int | dict[str, Any]:
-    """Validate and parse a hex ID string.
+def validate_hex_id(hex_id: str | int) -> int | dict[str, Any]:
+    """Validate and parse a hex ID string or integer.
 
-    :param hex_id_str: Hex ID string (e.g., "0x1234", "1234")
-    :param max_value: Maximum allowed value (default: 0xFFFF for 16-bit IDs)
+    :param hex_id: Hex ID string (e.g., "0x1234", "1234") or integer
     :return: Integer ID if valid, error dict if invalid
     """
-    if not hex_id_str:
+    # Handle integer input directly
+    if isinstance(hex_id, int):
+        if hex_id < 0:
+            return {"error": f"ID cannot be negative: {hex_id}"}
+        return hex_id
+
+    # Handle string input
+    if not hex_id:
         return {"error": "Empty ID provided"}
 
     try:
         # Remove 0x prefix if present
-        cleaned = hex_id_str.strip().lower()
+        cleaned = str(hex_id).strip().lower()
         if cleaned.startswith("0x"):
             cleaned = cleaned[2:]
 
         # Parse as hex
         id_value = int(cleaned, 16)
 
-        # Validate range
+        # Validate non-negative
         if id_value < 0:
-            return {"error": f"ID cannot be negative: {hex_id_str}"}
-
-        if id_value > max_value:
-            return {"error": f"ID {hex_id_str} exceeds maximum 0x{max_value:X}"}
+            return {"error": f"ID cannot be negative: {hex_id}"}
 
         return id_value
 
     except ValueError as e:
-        return {"error": f"Invalid hex ID '{hex_id_str}': {e}"}
+        return {"error": f"Invalid hex ID '{hex_id}': {e}"}
 
 
 def format_hex_id(id_value: int, width: int = 4) -> str:

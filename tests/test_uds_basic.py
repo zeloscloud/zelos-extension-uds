@@ -101,7 +101,7 @@ def test_tx_rx_id_validation_error():
     config = {
         "interface": "virtual",
         "channel": "test_invalid",
-        "tx_id": "0x20000000",  # Too large (max 29-bit is 0x1FFFFFFF)
+        "tx_id": "not_a_hex_value",  # Invalid hex string
         "rx_id": "0x7E8",
     }
     client = UDSClient(config)

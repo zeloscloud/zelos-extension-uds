@@ -68,12 +68,12 @@ def session(
       zelos-extension-uds session --txid 7E0 --rxid 7E8 --type programming
     """
     # Parse hex IDs
-    tx_id = validate_hex_id(txid, max_value=0x7FF)
+    tx_id = validate_hex_id(txid)
     if isinstance(tx_id, dict):
         logger.error(f"Invalid TX ID: {tx_id['error']}")
         sys.exit(1)
 
-    rx_id = validate_hex_id(rxid, max_value=0x7FF)
+    rx_id = validate_hex_id(rxid)
     if isinstance(rx_id, dict):
         logger.error(f"Invalid RX ID: {rx_id['error']}")
         sys.exit(1)

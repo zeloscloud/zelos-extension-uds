@@ -85,17 +85,17 @@ def routine(
       zelos-extension-uds routine --txid 7E0 --rxid 7E8 --id 0203 --control results
     """
     # Parse hex IDs
-    tx_id = validate_hex_id(txid, max_value=0x7FF)
+    tx_id = validate_hex_id(txid)
     if isinstance(tx_id, dict):
         logger.error(f"Invalid TX ID: {tx_id['error']}")
         sys.exit(1)
 
-    rx_id = validate_hex_id(rxid, max_value=0x7FF)
+    rx_id = validate_hex_id(rxid)
     if isinstance(rx_id, dict):
         logger.error(f"Invalid RX ID: {rx_id['error']}")
         sys.exit(1)
 
-    routine_id_value = validate_hex_id(routine_id, max_value=0xFFFF)
+    routine_id_value = validate_hex_id(routine_id)
     if isinstance(routine_id_value, dict):
         logger.error(f"Invalid routine ID: {routine_id_value['error']}")
         sys.exit(1)

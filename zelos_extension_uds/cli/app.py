@@ -39,8 +39,8 @@ def run_app_mode(file: Path | None) -> None:
     tx_id_str = config.get("tx_id", "0x7E0")
     rx_id_str = config.get("rx_id", "0x7E8")
 
-    tx_id = validate_hex_id(tx_id_str, max_value=0x7FF)
-    rx_id = validate_hex_id(rx_id_str, max_value=0x7FF)
+    tx_id = validate_hex_id(tx_id_str)
+    rx_id = validate_hex_id(rx_id_str)
 
     if isinstance(tx_id, dict):
         logger.error(f"Invalid TX ID: {tx_id['error']}")

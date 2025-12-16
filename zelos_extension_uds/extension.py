@@ -426,12 +426,9 @@ class UDSClient:
         :param rx_id: Optional action-specific RX ID (hex string)
         :return: Tuple of (tx_id_int, rx_id_int) or error dict
         """
-        # Max 29-bit CAN ID
-        max_can_id = 0x1FFFFFFF
-
         # Try action-specific TX ID first
         if tx_id:
-            tx_id_int = validate_hex_id(tx_id, max_value=max_can_id)
+            tx_id_int = validate_hex_id(tx_id)
             if isinstance(tx_id_int, dict):
                 return {"error": f"Invalid TX ID: {tx_id_int['error']}"}
         else:
@@ -440,13 +437,13 @@ class UDSClient:
             if tx_id_str is None:
                 return {"error": "No TX ID specified (provide in action or global config)"}
             # Validate config value
-            tx_id_int = validate_hex_id(tx_id_str, max_value=max_can_id)
+            tx_id_int = validate_hex_id(tx_id_str)
             if isinstance(tx_id_int, dict):
                 return {"error": f"Invalid TX ID in config: {tx_id_int['error']}"}
 
         # Try action-specific RX ID first
         if rx_id:
-            rx_id_int = validate_hex_id(rx_id, max_value=max_can_id)
+            rx_id_int = validate_hex_id(rx_id)
             if isinstance(rx_id_int, dict):
                 return {"error": f"Invalid RX ID: {rx_id_int['error']}"}
         else:
@@ -455,7 +452,7 @@ class UDSClient:
             if rx_id_str is None:
                 return {"error": "No RX ID specified (provide in action or global config)"}
             # Validate config value
-            rx_id_int = validate_hex_id(rx_id_str, max_value=max_can_id)
+            rx_id_int = validate_hex_id(rx_id_str)
             if isinstance(rx_id_int, dict):
                 return {"error": f"Invalid RX ID in config: {rx_id_int['error']}"}
 
@@ -640,7 +637,7 @@ class UDSClient:
         resolved_tx_id, resolved_rx_id = ids_result
 
         # Validate and parse DID
-        did_int = validate_hex_id(did, max_value=0xFFFF)
+        did_int = validate_hex_id(did)
         if isinstance(did_int, dict):
             return did_int
 
@@ -748,7 +745,7 @@ class UDSClient:
         resolved_tx_id, resolved_rx_id = ids_result
 
         # Validate and parse DID
-        did_int = validate_hex_id(did, max_value=0xFFFF)
+        did_int = validate_hex_id(did)
         if isinstance(did_int, dict):
             return did_int
 
@@ -994,7 +991,7 @@ class UDSClient:
             return {"error": f"Invalid control type: {control_type}"}
 
         # Validate and parse routine ID
-        routine_id_int = validate_hex_id(routine_id, max_value=0xFFFF)
+        routine_id_int = validate_hex_id(routine_id)
         if isinstance(routine_id_int, dict):
             return routine_id_int
 
@@ -1139,7 +1136,7 @@ class UDSClient:
             return {"error": f"Invalid control parameter: {control_parameter}"}
 
         # Validate and parse DID
-        did_int = validate_hex_id(did, max_value=0xFFFF)
+        did_int = validate_hex_id(did)
         if isinstance(did_int, dict):
             return did_int
 
@@ -1795,7 +1792,7 @@ class UDSClient:
         resolved_tx_id, resolved_rx_id = ids_result
 
         # Parse address
-        address_int = validate_hex_id(address, max_value=0xFFFFFFFF)
+        address_int = validate_hex_id(address)
         if isinstance(address_int, dict):
             return {"error": f"Invalid address: {address_int['error']}"}
 
@@ -2100,7 +2097,7 @@ class UDSClient:
         resolved_tx_id, resolved_rx_id = ids_result
 
         # Parse address
-        address_int = validate_hex_id(address, max_value=0xFFFFFFFF)
+        address_int = validate_hex_id(address)
         if isinstance(address_int, dict):
             return {"error": f"Invalid address: {address_int['error']}"}
 
