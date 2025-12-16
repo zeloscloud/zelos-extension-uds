@@ -2,7 +2,7 @@
 # See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/ for full documentation
 
 name = "Zelos UDS"
-version = "0.1.3"
+version = "0.1.4"
 description = "Zelos Unified Diagnostic Services (UDS)"
 author = "Zelos"
 repository = "https://github.com/zeloscloud/zelos-extension-uds"
