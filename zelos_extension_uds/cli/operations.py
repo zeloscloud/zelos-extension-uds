@@ -59,6 +59,7 @@ def create_uds_client(
 
     config = default_client_config.copy()
     config["data_identifiers"] = {"default": HexDidCodec}
+    config["input_output"] = {"default": {"codec": HexDidCodec}}
 
     # Create UDS client
     client = Client(connection, config=config)
