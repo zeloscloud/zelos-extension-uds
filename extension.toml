@@ -11,7 +11,7 @@ keywords = ["uds", "automotive", "diagnostics", "can", "iso-tp"]
 categories = ["Automotive", "Diagnostics"]
 
 # File references (relative paths in archive)
-icon = "assets/icon.svg"
+icon = "assets/icon.png"
 readme = "README.md"
 changelog = "CHANGELOG.md"
 

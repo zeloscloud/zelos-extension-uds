@@ -58,7 +58,7 @@ zelos-extension-uds/
 │   ├── package_extension.py        # Creates marketplace tarball
 │   └── bump_version.py             # Updates version numbers
 ├── assets/                         # Icons and media
-│   └── icon.svg                    # Marketplace icon
+│   └── icon.png                    # Marketplace icon
 ├── .github/                        # GitHub automation
 │   ├── workflows/
 │   │   ├── CI.yml                  # Run tests on PR
