@@ -1,9 +1,9 @@
 # Zelos Extension Manifest
 # See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/ for full documentation
 
-name = "Zelos UDS"
-version = "0.1.5"
-description = "Zelos Unified Diagnostic Services (UDS)"
+name = "UDS"
+version = "0.1.6"
+description = "Unified Diagnostic Services (UDS) extension for Zelos"
 author = "Zelos"
 repository = "https://github.com/zeloscloud/zelos-extension-uds"
 homepage = "https://github.com/zeloscloud/zelos-extension-uds"
