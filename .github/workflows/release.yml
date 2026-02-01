@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -75,7 +75,7 @@ jobs:
           echo "✓ Package created: $(ls $PACKAGE_FILE)"
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2.4.1
+        uses: softprops/action-gh-release@v2.5.0
         with:
           files: "*-v${{ steps.version.outputs.VERSION }}.tar.gz"
           generate_release_notes: true
