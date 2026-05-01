@@ -1,5 +1,7 @@
 """UDS (Unified Diagnostic Services) over CAN implementation for Zelos."""
 
+from __future__ import annotations
+
 import asyncio
 import binascii
 import logging
@@ -7,7 +9,10 @@ import math
 import struct
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .demo_server import DemoUDSServer
 
 import can
 import isotp
@@ -25,7 +30,18 @@ from udsoncan.services import (
 )
 from zelos_sdk.actions import action
 
-from .utils import format_hex_id, format_hex_string, parse_hex_string, validate_hex_id
+from .utils import (
+    ENDIANNESS_BIG,
+    ENDIANNESS_CHOICES,
+    PAYLOAD_TYPE_CHOICES,
+    PAYLOAD_TYPE_HEX,
+    format_hex_id,
+    format_hex_string,
+    format_typed_representations,
+    parse_hex_string,
+    parse_typed_payload,
+    validate_hex_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +196,8 @@ class UDSClient:
         self.tester_present_rx_id: int | None = None  # Track TP RX ID
         self.tester_present_cleanup: dict[str, Any] | None = None  # TP resources to clean up
 
+        self.demo_server: DemoUDSServer | None = None
+
         # Create trace source (in isolated namespace if provided)
         if self.namespace:
             self.source = zelos_sdk.TraceSource("uds_client", namespace=self.namespace)
@@ -189,7 +207,14 @@ class UDSClient:
         self._define_schema()
 
     def start(self) -> None:
-        """Start UDS client - validates config without creating connections."""
+        """Start UDS client - validates config without creating connections.
+
+        When the configured CAN interface is ``demo``, also spawns an
+        in-process demo UDS server bound to the configured channel +
+        reciprocal CAN IDs. This lets the agent and CLI exercise the
+        full action surface end-to-end against a virtual ECU without
+        external hardware.
+        """
         logger.info("Starting UDS client")
 
         try:
@@ -200,12 +225,59 @@ class UDSClient:
             logger.info(f"UDS client configured: interface={interface}, channel={channel}")
             logger.info("Connections will be created on-demand for each transaction")
 
+            if interface == "demo":
+                self._start_demo_server()
+
             self.running = True
 
         except Exception as e:
             logger.error(f"Failed to start UDS client: {e}")
             self.stop()
             raise
+
+    def _resolve_can_transport(self) -> tuple[str, str]:
+        """Translate the configured CAN interface to a python-can pair.
+
+        ``demo`` maps to ``("virtual", "zelos_uds_demo")`` (with the
+        user's channel override honored if provided). All other
+        interfaces pass through untouched. ``self.config`` is left
+        unchanged so start/stop/start cycles re-resolve idempotently.
+        """
+        interface = self.config.get("interface", "socketcan")
+        channel = self.config.get("channel")
+        if interface == "demo":
+            return "virtual", channel or "zelos_uds_demo"
+        return interface, channel or "vcan0"
+
+    def _start_demo_server(self) -> None:
+        """Spawn an in-process demo UDS server for the ``demo`` interface."""
+        from .demo_server import DemoUDSServer
+
+        interface, channel = self._resolve_can_transport()
+
+        tx_id_cfg = self.config.get("tx_id", "0x7E0")
+        rx_id_cfg = self.config.get("rx_id", "0x7E8")
+        client_tx = validate_hex_id(tx_id_cfg)
+        client_rx = validate_hex_id(rx_id_cfg)
+        if isinstance(client_tx, dict) or isinstance(client_rx, dict):
+            raise ValueError("demo interface requires valid tx_id/rx_id hex strings in config")
+
+        # Server perspective: TX is what the ECU sends (= client RX),
+        # RX is what the ECU receives (= client TX).
+        self.demo_server = DemoUDSServer(
+            channel=channel,
+            tx_id=client_rx,
+            rx_id=client_tx,
+            interface=interface,
+        )
+        self.demo_server.start()
+        logger.info(
+            "demo interface: embedded DemoUDSServer on %s/%s (server TX=0x%X, RX=0x%X)",
+            interface,
+            channel,
+            client_rx,
+            client_tx,
+        )
 
     def stop(self) -> None:
         """Stop UDS client and clean up resources."""
@@ -220,6 +292,14 @@ class UDSClient:
 
         self.tester_present_tx_id = None
         self.tester_present_rx_id = None
+
+        # Tear down embedded demo server, if any
+        if self.demo_server is not None:
+            try:
+                self.demo_server.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping demo UDS server: {e}")
+            self.demo_server = None
 
         logger.info("UDS client stopped")
 
@@ -311,9 +391,9 @@ class UDSClient:
         id_bits = 29 if use_extended else 11
         logger.debug(f"Creating UDS client: TX=0x{tx_id:X}, RX=0x{rx_id:X} ({id_bits}-bit)")
 
-        # Create CAN bus interface
-        interface = self.config.get("interface", "socketcan")
-        channel = self.config.get("channel", "vcan0")
+        # Resolve "demo" → ("virtual", "zelos_uds_demo") so embedded mock
+        # is reachable; pass through other interfaces unchanged.
+        interface, channel = self._resolve_can_transport()
         bitrate = self.config.get("bitrate")
 
         bus_kwargs: dict[str, Any] = {"interface": interface, "channel": channel}
@@ -494,6 +574,18 @@ class UDSClient:
         }
 
     @action("Diagnostic Session Control", "Change diagnostic session")
+    @action.select(
+        "session_type",
+        title="Session Type",
+        description="Type of diagnostic session",
+        choices=[
+            "Default Session",
+            "Programming Session",
+            "Extended Diagnostic Session",
+            "Safety System Diagnostic Session",
+        ],
+        default="Extended Diagnostic Session",
+    )
     @action.text(
         "tx_id",
         title="TX ID (hex, optional)",
@@ -510,20 +602,8 @@ class UDSClient:
         default="",
         required=False,
     )
-    @action.select(
-        "session_type",
-        title="Session Type",
-        description="Type of diagnostic session",
-        choices=[
-            "Default Session",
-            "Programming Session",
-            "Extended Diagnostic Session",
-            "Safety System Diagnostic Session",
-        ],
-        default="Extended Diagnostic Session",
-    )
     def diagnostic_session_control(
-        self, tx_id: str = "", rx_id: str = "", session_type: str = "Extended Diagnostic Session"
+        self, session_type: str = "Extended Diagnostic Session", tx_id: str = "", rx_id: str = ""
     ) -> dict[str, Any]:
         """Change diagnostic session using DiagnosticSessionControl service.
 
@@ -594,6 +674,13 @@ class UDSClient:
 
     @action("Read Data By Identifier", "Read data from ECU by DID")
     @action.text(
+        "did",
+        title="Data Identifier (hex)",
+        description="DID to read (e.g., 0x1234, 1234)",
+        placeholder="0x1234",
+        default="0x1234",
+    )
+    @action.text(
         "tx_id",
         title="TX ID (hex, optional)",
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
@@ -607,15 +694,8 @@ class UDSClient:
         placeholder="0x7E8",
         default="",
     )
-    @action.text(
-        "did",
-        title="Data Identifier (hex)",
-        description="DID to read (e.g., 0x1234, 1234)",
-        placeholder="0x1234",
-        default="0x1234",
-    )
     def read_data_by_identifier(
-        self, tx_id: str = "", rx_id: str = "", did: str = "0x1234"
+        self, did: str = "0x1234", tx_id: str = "", rx_id: str = ""
     ) -> dict[str, Any]:
         """Read data from ECU using ReadDataByIdentifier service.
 
@@ -668,13 +748,19 @@ class UDSClient:
             # Log RX event
             self._log_uds_rx(self.SID_READ_DATA_BY_IDENTIFIER, did_int, data, True, elapsed)
 
-            return {
+            result: dict[str, Any] = {
                 "status": "success",
                 "did": format_hex_id(did_int, width=4),
                 "data": data_hex,
                 "length": len(data),
                 "elapsed_ms": round(elapsed * 1000, 2),
             }
+            # For 1/2/4/8-byte responses, surface int/float interpretations
+            # (both endiannesses) so users don't hand-decode hex.
+            representations = format_typed_representations(data)
+            if representations:
+                result["representations"] = representations
+            return result
 
         except NegativeResponseException as e:
             nrc_name = e.response.code_name if hasattr(e.response, "code_name") else "Unknown"
@@ -692,6 +778,44 @@ class UDSClient:
 
     @action("Write Data By Identifier", "Write data to ECU by DID")
     @action.text(
+        "did",
+        title="Data Identifier (hex)",
+        description="DID to write (e.g., 0x1234)",
+        placeholder="0x1234",
+        default="0x1234",
+    )
+    @action.text(
+        "data",
+        title="Data",
+        description=(
+            "Data to write. For 'hex' use raw hex (e.g., 01 02 03 04). For "
+            "numeric types, enter a number (decimal or 0x-prefixed hex) and "
+            "it is packed to the register width using the selected endianness."
+        ),
+        placeholder="01 02 03 04",
+        default="00",
+    )
+    @action.select(
+        "data_type",
+        title="Data Type",
+        description=(
+            "How to interpret Data. 'hex' = raw hex; numeric types pack the "
+            "input to the type's register size "
+            "(int16=2, int32=4, float=4, double=8 bytes, etc.)."
+        ),
+        choices=PAYLOAD_TYPE_CHOICES,
+        default=PAYLOAD_TYPE_HEX,
+    )
+    @action.select(
+        "endianness",
+        title="Endianness",
+        description=(
+            "Byte order for numeric Data Types. Ignored for 'hex' (positional) and 1-byte types."
+        ),
+        choices=ENDIANNESS_CHOICES,
+        default=ENDIANNESS_BIG,
+    )
+    @action.text(
         "tx_id",
         title="TX ID (hex, optional)",
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
@@ -707,22 +831,14 @@ class UDSClient:
         default="",
         required=False,
     )
-    @action.text(
-        "did",
-        title="Data Identifier (hex)",
-        description="DID to write (e.g., 0x1234)",
-        placeholder="0x1234",
-        default="0x1234",
-    )
-    @action.text(
-        "data",
-        title="Data (hex bytes)",
-        description="Data to write (e.g., 01 02 03)",
-        placeholder="01 02 03 04",
-        default="00",
-    )
     def write_data_by_identifier(
-        self, tx_id: str = "", rx_id: str = "", did: str = "0x1234", data: str = "00"
+        self,
+        did: str = "0x1234",
+        data: str = "00",
+        data_type: str = PAYLOAD_TYPE_HEX,
+        endianness: str = ENDIANNESS_BIG,
+        tx_id: str = "",
+        rx_id: str = "",
     ) -> dict[str, Any]:
         """Write data to ECU using WriteDataByIdentifier service.
 
@@ -749,8 +865,7 @@ class UDSClient:
         if isinstance(did_int, dict):
             return did_int
 
-        # Parse data - can be hex string or raw bytes
-        data_bytes = parse_hex_string(data)
+        data_bytes = parse_typed_payload(data, data_type, endianness)
         if isinstance(data_bytes, dict):
             return data_bytes
 
@@ -807,6 +922,13 @@ class UDSClient:
                 self._cleanup_uds_client(cleanup)
 
     @action("ECU Reset", "Reset the ECU")
+    @action.select(
+        "reset_type",
+        title="Reset Type",
+        description="Type of reset to perform",
+        choices=["Hard Reset", "Soft Reset", "Key Off On Reset"],
+        default="Soft Reset",
+    )
     @action.text(
         "tx_id",
         title="TX ID (hex, optional)",
@@ -823,15 +945,8 @@ class UDSClient:
         default="",
         required=False,
     )
-    @action.select(
-        "reset_type",
-        title="Reset Type",
-        description="Type of reset to perform",
-        choices=["Hard Reset", "Soft Reset", "Key Off On Reset"],
-        default="Soft Reset",
-    )
     def ecu_reset(
-        self, tx_id: str = "", rx_id: str = "", reset_type: str = "Soft Reset"
+        self, reset_type: str = "Soft Reset", tx_id: str = "", rx_id: str = ""
     ) -> dict[str, Any]:
         """Perform ECU reset using ECUReset service.
 
@@ -916,6 +1031,51 @@ class UDSClient:
 
     @action("Routine Control", "Control diagnostic routines")
     @action.text(
+        "routine_id",
+        title="Routine ID (hex)",
+        description="Routine identifier (e.g., 0x0203)",
+        placeholder="0x0203",
+        default="0x0203",
+    )
+    @action.select(
+        "control_type",
+        title="Control Type",
+        description="Routine control operation",
+        choices=["Start Routine", "Stop Routine", "Request Results"],
+        default="Start Routine",
+    )
+    @action.text(
+        "data",
+        title="Data (optional)",
+        description=(
+            "Optional routine data. For 'hex' use raw hex (e.g., 01 02). "
+            "For numeric types, enter a number (decimal or 0x-prefixed hex) "
+            "and it is packed to the register width using the selected "
+            "endianness."
+        ),
+        placeholder="01 02",
+        default="",
+    )
+    @action.select(
+        "data_type",
+        title="Data Type",
+        description=(
+            "How to interpret Data. 'hex' = raw hex; numeric types pack the "
+            "input to the type's register size."
+        ),
+        choices=PAYLOAD_TYPE_CHOICES,
+        default=PAYLOAD_TYPE_HEX,
+    )
+    @action.select(
+        "endianness",
+        title="Endianness",
+        description=(
+            "Byte order for numeric Data Types. Ignored for 'hex' (positional) and 1-byte types."
+        ),
+        choices=ENDIANNESS_CHOICES,
+        default=ENDIANNESS_BIG,
+    )
+    @action.text(
         "tx_id",
         title="TX ID (hex, optional)",
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
@@ -931,34 +1091,15 @@ class UDSClient:
         default="",
         required=False,
     )
-    @action.select(
-        "control_type",
-        title="Control Type",
-        description="Routine control operation",
-        choices=["Start Routine", "Stop Routine", "Request Results"],
-        default="Start Routine",
-    )
-    @action.text(
-        "routine_id",
-        title="Routine ID (hex)",
-        description="Routine identifier (e.g., 0x0203)",
-        placeholder="0x0203",
-        default="0x0203",
-    )
-    @action.text(
-        "data",
-        title="Data (hex bytes, optional)",
-        description="Optional data for routine (e.g., 01 02)",
-        placeholder="01 02",
-        default="",
-    )
     def routine_control(
         self,
+        routine_id: str = "0x0203",
+        control_type: str = "Start Routine",
+        data: str = "",
+        data_type: str = PAYLOAD_TYPE_HEX,
+        endianness: str = ENDIANNESS_BIG,
         tx_id: str = "",
         rx_id: str = "",
-        control_type: str = "Start Routine",
-        routine_id: str = "0x0203",
-        data: str = "",
     ) -> dict[str, Any]:
         """Control diagnostic routine using RoutineControl service.
 
@@ -995,12 +1136,12 @@ class UDSClient:
         if isinstance(routine_id_int, dict):
             return routine_id_int
 
-        # Parse optional data
-        data_bytes = b""
+        data_bytes: bytes = b""
         if data.strip():
-            data_bytes = parse_hex_string(data)
-            if isinstance(data_bytes, dict):
-                return data_bytes
+            parsed = parse_typed_payload(data, data_type, endianness)
+            if isinstance(parsed, dict):
+                return parsed
+            data_bytes = parsed
 
         # Create on-demand UDS client for this transaction
         client = None
@@ -1051,22 +1192,6 @@ class UDSClient:
 
     @action("Input Output Control", "Control input/output signals")
     @action.text(
-        "tx_id",
-        title="TX ID (hex, optional)",
-        description="CAN TX ID (overrides global, e.g., 0x7E0)",
-        placeholder="",
-        default="",
-        required=False,
-    )
-    @action.text(
-        "rx_id",
-        title="RX ID (hex, optional)",
-        description="CAN RX ID (overrides global, e.g., 0x7E8)",
-        placeholder="",
-        default="",
-        required=False,
-    )
-    @action.text(
         "did",
         title="Data Identifier (hex)",
         description="DID to control (e.g., 0x1234)",
@@ -1087,18 +1212,62 @@ class UDSClient:
     )
     @action.text(
         "control_option",
-        title="Control Option Record (hex, optional)",
-        description="Optional control data (e.g., 01 02)",
+        title="Control Option Record (optional)",
+        description=(
+            "Optional control data. For 'hex' use raw hex (e.g., 01 02). "
+            "For numeric types, enter a number (decimal or 0x-prefixed hex) "
+            "and it is packed to the register width using the selected "
+            "endianness."
+        ),
         placeholder="01 02",
         default="",
     )
+    @action.select(
+        "control_option_type",
+        title="Control Option Type",
+        description=(
+            "How to interpret Control Option Record. 'hex' = raw hex; "
+            "numeric types pack the input to the type's register size "
+            "(int16=2, int32=4, float=4, etc.)."
+        ),
+        choices=PAYLOAD_TYPE_CHOICES,
+        default=PAYLOAD_TYPE_HEX,
+    )
+    @action.select(
+        "endianness",
+        title="Endianness",
+        description=(
+            "Byte order for numeric Control Option Types. Ignored for 'hex' "
+            "(positional) and 1-byte types."
+        ),
+        choices=ENDIANNESS_CHOICES,
+        default=ENDIANNESS_BIG,
+    )
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+        required=False,
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+        required=False,
+    )
     def input_output_control(
         self,
-        tx_id: str = "",
-        rx_id: str = "",
         did: str = "0x1234",
         control_parameter: str = "Return Control To ECU",
         control_option: str = "",
+        control_option_type: str = PAYLOAD_TYPE_HEX,
+        endianness: str = ENDIANNESS_BIG,
+        tx_id: str = "",
+        rx_id: str = "",
     ) -> dict[str, Any]:
         """Control input/output using InputOutputControlByIdentifier service.
 
@@ -1140,12 +1309,12 @@ class UDSClient:
         if isinstance(did_int, dict):
             return did_int
 
-        # Parse optional control option
-        control_option_bytes = b""
+        control_option_bytes: bytes = b""
         if control_option.strip():
-            control_option_bytes = parse_hex_string(control_option)
-            if isinstance(control_option_bytes, dict):
-                return control_option_bytes
+            parsed = parse_typed_payload(control_option, control_option_type, endianness)
+            if isinstance(parsed, dict):
+                return parsed
+            control_option_bytes = parsed
 
         # Create on-demand UDS client for this transaction
         client = None
@@ -1188,6 +1357,13 @@ class UDSClient:
                 self._cleanup_uds_client(cleanup)
 
     @action("Tester Present", "Send tester present message")
+    @action.boolean(
+        "suppress_response",
+        title="Suppress Positive Response",
+        description="Don't wait for ECU response (fire-and-forget)",
+        default=False,
+        widget="toggle",
+    )
     @action.text(
         "tx_id",
         title="TX ID (hex, optional)",
@@ -1204,15 +1380,8 @@ class UDSClient:
         default="",
         required=False,
     )
-    @action.boolean(
-        "suppress_response",
-        title="Suppress Positive Response",
-        description="Don't wait for ECU response (fire-and-forget)",
-        default=False,
-        widget="toggle",
-    )
     def send_tester_present(
-        self, tx_id: str = "", rx_id: str = "", suppress_response: bool = False
+        self, suppress_response: bool = False, tx_id: str = "", rx_id: str = ""
     ) -> dict[str, Any]:
         """Send tester present message using TesterPresent service.
 
@@ -1288,22 +1457,6 @@ class UDSClient:
                 self._cleanup_uds_client(cleanup)
 
     @action("Periodic Tester Present", "Start/stop periodic tester present")
-    @action.text(
-        "tx_id",
-        title="TX ID (hex, optional)",
-        description="CAN TX ID (overrides global, e.g., 0x7E0)",
-        placeholder="",
-        default="",
-        required=False,
-    )
-    @action.text(
-        "rx_id",
-        title="RX ID (hex, optional)",
-        description="CAN RX ID (overrides global, e.g., 0x7E8)",
-        placeholder="",
-        default="",
-        required=False,
-    )
     @action.boolean(
         "enabled",
         title="Enable",
@@ -1321,8 +1474,24 @@ class UDSClient:
         description="Send tester present every N seconds",
         widget="range",
     )
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+        required=False,
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+        required=False,
+    )
     def periodic_tester_present(
-        self, tx_id: str = "", rx_id: str = "", enabled: bool = False, interval: float = 2.0
+        self, enabled: bool = False, interval: float = 2.0, tx_id: str = "", rx_id: str = ""
     ) -> dict[str, Any]:
         """Start or stop periodic tester present messages.
 
@@ -1396,22 +1565,6 @@ class UDSClient:
         }
 
     @action("Read DTC Information", "Read diagnostic trouble codes")
-    @action.text(
-        "tx_id",
-        title="TX ID (hex, optional)",
-        description="CAN TX ID (overrides global, e.g., 0x7E0)",
-        placeholder="",
-        default="",
-        required=False,
-    )
-    @action.text(
-        "rx_id",
-        title="RX ID (hex, optional)",
-        description="CAN RX ID (overrides global, e.g., 0x7E8)",
-        placeholder="",
-        default="",
-        required=False,
-    )
     @action.select(
         "status_mask",
         title="DTC Status Mask",
@@ -1429,8 +1582,24 @@ class UDSClient:
         ],
         default="All DTCs",
     )
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+        required=False,
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+        required=False,
+    )
     def read_dtc_information(
-        self, tx_id: str = "", rx_id: str = "", status_mask: str = "All DTCs"
+        self, status_mask: str = "All DTCs", tx_id: str = "", rx_id: str = ""
     ) -> dict[str, Any]:
         """Read diagnostic trouble codes using ReadDTCInformation service.
 
@@ -1520,6 +1689,13 @@ class UDSClient:
 
     @action("Clear Diagnostic Information", "Clear diagnostic trouble codes")
     @action.text(
+        "group",
+        title="DTC Group (hex, optional)",
+        description="DTC group to clear (3 bytes, e.g., FFFFFF for all DTCs)",
+        placeholder="FFFFFF",
+        default="FFFFFF",
+    )
+    @action.text(
         "tx_id",
         title="TX ID (hex, optional)",
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
@@ -1535,15 +1711,8 @@ class UDSClient:
         default="",
         required=False,
     )
-    @action.text(
-        "group",
-        title="DTC Group (hex, optional)",
-        description="DTC group to clear (3 bytes, e.g., FFFFFF for all DTCs)",
-        placeholder="FFFFFF",
-        default="FFFFFF",
-    )
     def clear_diagnostic_information(
-        self, tx_id: str = "", rx_id: str = "", group: str = "FFFFFF"
+        self, group: str = "FFFFFF", tx_id: str = "", rx_id: str = ""
     ) -> dict[str, Any]:
         """Clear diagnostic trouble codes using ClearDiagnosticInformation service.
 
@@ -1609,6 +1778,20 @@ class UDSClient:
                 self._cleanup_uds_client(cleanup)
 
     @action("Security Access", "Request security access")
+    @action.select(
+        "access_level",
+        title="Access Level",
+        description="Security access level to request",
+        choices=["Level 1", "Level 2", "Level 3", "Level 4"],
+        default="Level 1",
+    )
+    @action.text(
+        "key",
+        title="Security Key (hex, optional)",
+        description="Security key for seed-key exchange (leave empty for seed request)",
+        placeholder="",
+        default="",
+    )
     @action.text(
         "tx_id",
         title="TX ID (hex, optional)",
@@ -1625,22 +1808,8 @@ class UDSClient:
         default="",
         required=False,
     )
-    @action.select(
-        "access_level",
-        title="Access Level",
-        description="Security access level to request",
-        choices=["Level 1", "Level 2", "Level 3", "Level 4"],
-        default="Level 1",
-    )
-    @action.text(
-        "key",
-        title="Security Key (hex, optional)",
-        description="Security key for seed-key exchange (leave empty for seed request)",
-        placeholder="",
-        default="",
-    )
     def security_access(
-        self, tx_id: str = "", rx_id: str = "", access_level: str = "Level 1", key: str = ""
+        self, access_level: str = "Level 1", key: str = "", tx_id: str = "", rx_id: str = ""
     ) -> dict[str, Any]:
         """Request security access using SecurityAccess service.
 
@@ -1742,6 +1911,20 @@ class UDSClient:
 
     @action("Request Download", "Initiate firmware download to ECU")
     @action.text(
+        "address",
+        title="Memory Address (hex)",
+        description="Target memory address (e.g., 0x08000000)",
+        placeholder="0x08000000",
+        default="0x00000000",
+    )
+    @action.text(
+        "size",
+        title="Data Size (bytes)",
+        description="Size of data to be transferred",
+        placeholder="1024",
+        default="1024",
+    )
+    @action.text(
         "tx_id",
         title="TX ID (hex, optional)",
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
@@ -1757,22 +1940,8 @@ class UDSClient:
         default="",
         required=False,
     )
-    @action.text(
-        "address",
-        title="Memory Address (hex)",
-        description="Target memory address (e.g., 0x08000000)",
-        placeholder="0x08000000",
-        default="0x00000000",
-    )
-    @action.text(
-        "size",
-        title="Data Size (bytes)",
-        description="Size of data to be transferred",
-        placeholder="1024",
-        default="1024",
-    )
     def request_download(
-        self, tx_id: str = "", rx_id: str = "", address: str = "0x00000000", size: str = "1024"
+        self, address: str = "0x00000000", size: str = "1024", tx_id: str = "", rx_id: str = ""
     ) -> dict[str, Any]:
         """Initiate firmware download using RequestDownload service (0x34).
 
@@ -1851,6 +2020,20 @@ class UDSClient:
 
     @action("Transfer Data", "Transfer a block of data to ECU")
     @action.text(
+        "sequence",
+        title="Sequence Number",
+        description="Block sequence number (0-255)",
+        placeholder="1",
+        default="1",
+    )
+    @action.text(
+        "data",
+        title="Data (hex bytes)",
+        description="Data block to transfer (e.g., 01 02 03 04)",
+        placeholder="00 11 22 33",
+        default="00",
+    )
+    @action.text(
         "tx_id",
         title="TX ID (hex, optional)",
         description="CAN TX ID (overrides global, e.g., 0x7E0)",
@@ -1866,22 +2049,8 @@ class UDSClient:
         default="",
         required=False,
     )
-    @action.text(
-        "sequence",
-        title="Sequence Number",
-        description="Block sequence number (0-255)",
-        placeholder="1",
-        default="1",
-    )
-    @action.text(
-        "data",
-        title="Data (hex bytes)",
-        description="Data block to transfer (e.g., 01 02 03 04)",
-        placeholder="00 11 22 33",
-        default="00",
-    )
     def transfer_data(
-        self, tx_id: str = "", rx_id: str = "", sequence: str = "1", data: str = "00"
+        self, sequence: str = "1", data: str = "00", tx_id: str = "", rx_id: str = ""
     ) -> dict[str, Any]:
         """Transfer data block using TransferData service (0x36).
 
@@ -2014,22 +2183,6 @@ class UDSClient:
 
     @action("Flash Firmware", "Flash firmware file to ECU")
     @action.text(
-        "tx_id",
-        title="TX ID (hex, optional)",
-        description="CAN TX ID (overrides global, e.g., 0x7E0)",
-        placeholder="",
-        default="",
-        required=False,
-    )
-    @action.text(
-        "rx_id",
-        title="RX ID (hex, optional)",
-        description="CAN RX ID (overrides global, e.g., 0x7E8)",
-        placeholder="",
-        default="",
-        required=False,
-    )
-    @action.text(
         "address",
         title="Memory Address (hex)",
         description="Target memory address (e.g., 0x08000000)",
@@ -2059,14 +2212,30 @@ class UDSClient:
         default=True,
         widget="toggle",
     )
+    @action.text(
+        "tx_id",
+        title="TX ID (hex, optional)",
+        description="CAN TX ID (overrides global, e.g., 0x7E0)",
+        placeholder="",
+        default="",
+        required=False,
+    )
+    @action.text(
+        "rx_id",
+        title="RX ID (hex, optional)",
+        description="CAN RX ID (overrides global, e.g., 0x7E8)",
+        placeholder="",
+        default="",
+        required=False,
+    )
     def flash_firmware(
         self,
-        tx_id: str = "",
-        rx_id: str = "",
         address: str = "0x00000000",
         data: str = "",
         block_size: int = 256,
         change_session: bool = True,
+        tx_id: str = "",
+        rx_id: str = "",
     ) -> dict[str, Any]:
         """Flash firmware to ECU using stateless UDS transactions.
 

@@ -13,7 +13,6 @@ categories = ["Automotive", "Diagnostics"]
 # File references (relative paths in archive)
 icon = "assets/icon.png"
 readme = "README.md"
-changelog = "CHANGELOG.md"
 
 # Compatibility (optional, defaults to ^25.0.20)
 [zelos]

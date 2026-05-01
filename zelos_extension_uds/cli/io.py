@@ -6,7 +6,14 @@ import sys
 import rich_click as click
 from udsoncan.services import InputOutputControlByIdentifier
 
-from ..utils import parse_hex_string, validate_hex_id
+from ..utils import (
+    ENDIANNESS_BIG,
+    ENDIANNESS_CHOICES,
+    PAYLOAD_TYPE_CHOICES,
+    PAYLOAD_TYPE_HEX,
+    parse_typed_payload,
+    validate_hex_id,
+)
 from .operations import input_output_control
 
 logger = logging.getLogger(__name__)
@@ -41,7 +48,23 @@ logger = logging.getLogger(__name__)
 @click.option(
     "--option",
     type=str,
-    help="Optional control option data in hex (e.g., '01 02', '0102')",
+    help="Optional control option data. Interpretation depends on --type.",
+)
+@click.option(
+    "--type",
+    "option_type",
+    type=click.Choice(PAYLOAD_TYPE_CHOICES, case_sensitive=False),
+    default=PAYLOAD_TYPE_HEX,
+    show_default=True,
+    help="How to interpret --option. 'hex' = raw hex bytes; numeric types pack to register width.",
+)
+@click.option(
+    "--endian",
+    "endianness",
+    type=click.Choice(ENDIANNESS_CHOICES, case_sensitive=False),
+    default=ENDIANNESS_BIG,
+    show_default=True,
+    help="Byte order for numeric --type values. Ignored for 'hex' and 1-byte types.",
 )
 @click.option(
     "--interface",
@@ -64,6 +87,8 @@ def io(
     did: str,
     control: str,
     option: str | None,
+    option_type: str,
+    endianness: str,
     interface: str,
     channel: str,
     bitrate: int | None,
@@ -100,10 +125,9 @@ def io(
         logger.error(f"Invalid DID: {did_value['error']}")
         sys.exit(1)
 
-    # Parse optional control option data
     option_bytes = None
     if option:
-        option_bytes = parse_hex_string(option)
+        option_bytes = parse_typed_payload(option, option_type.lower(), endianness.lower())
         if isinstance(option_bytes, dict):
             logger.error(f"Invalid option data: {option_bytes['error']}")
             sys.exit(1)

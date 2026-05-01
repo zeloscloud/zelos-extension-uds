@@ -4,13 +4,14 @@ import logging
 from typing import Any
 
 import can
+import isotp
 from udsoncan.client import Client
 from udsoncan.connections import PythonIsoTpConnection
 from udsoncan.exceptions import NegativeResponseException, TimeoutException
 from udsoncan.services import ECUReset, InputOutputControlByIdentifier, RoutineControl
 
 from ..extension import HexDidCodec
-from ..utils import format_hex_id, format_hex_string
+from ..utils import format_hex_id, format_hex_string, format_typed_representations
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +23,12 @@ def create_uds_client(
     channel: str = "can0",
     bitrate: int | None = None,
     **kwargs: Any,
-) -> tuple[can.BusABC, Client]:
-    """Create a UDS client connection.
+) -> tuple[can.BusABC, Client, dict[str, Any]]:
+    """Create a UDS client connection over CAN + ISO-TP.
+
+    Mirrors the in-extension pipeline: CAN bus -> Notifier -> ISO-TP stack
+    -> PythonIsoTpConnection -> UDS Client. Returns the resources needed
+    so callers can tear them down cleanly.
 
     :param tx_id: Transmit CAN ID (tester to ECU)
     :param rx_id: Receive CAN ID (ECU to tester)
@@ -31,28 +36,49 @@ def create_uds_client(
     :param channel: CAN channel/device
     :param bitrate: CAN bus bitrate (if required by interface)
     :param kwargs: Additional python-can Bus() kwargs
-    :return: Tuple of (bus, client)
+    :return: Tuple of (bus, client, cleanup) — cleanup is a dict of
+        ancillary resources (notifier, isotp_stack, connection, and an
+        optional ``demo_server`` when ``interface == "demo"``) that
+        callers should ``shutdown_uds_client`` to fully release.
     """
-    # Build CAN bus config
-    bus_config = {
-        "interface": interface,
-        "channel": channel,
-    }
+    # When --interface demo, spawn an in-process DemoUDSServer and route
+    # the CLI client at it via python-can's virtual transport. Cross-
+    # process won't work — virtual buses are isolated per process.
+    demo_server = None
+    if interface == "demo":
+        from ..demo_server import DemoUDSServer
 
-    # Add bitrate if provided
+        if not channel or channel == "can0":
+            channel = "zelos_uds_demo"
+        interface = "virtual"
+        demo_server = DemoUDSServer(channel=channel, tx_id=rx_id, rx_id=tx_id, interface=interface)
+        demo_server.start()
+        logger.info(
+            "demo interface: embedded DemoUDSServer on virtual/%s (server TX=0x%X, RX=0x%X)",
+            channel,
+            rx_id,
+            tx_id,
+        )
+
+    # Build CAN bus config
+    bus_config = {"interface": interface, "channel": channel}
     if bitrate is not None:
         bus_config["bitrate"] = bitrate
-
-    # Merge additional kwargs
     bus_config.update(kwargs)
 
     logger.debug(f"Creating CAN bus with config: {bus_config}")
-
-    # Create CAN bus
     bus = can.Bus(**bus_config)
 
-    # Create ISO-TP connection
-    connection = PythonIsoTpConnection(bus, rxid=rx_id, txid=tx_id)
+    # 11-bit unless either ID exceeds the 11-bit range
+    use_extended = tx_id > 0x7FF or rx_id > 0x7FF
+    addr_mode = (
+        isotp.AddressingMode.Normal_29bits if use_extended else isotp.AddressingMode.Normal_11bits
+    )
+    tp_addr = isotp.Address(addr_mode, txid=tx_id, rxid=rx_id)
+
+    notifier = can.Notifier(bus, [])
+    isotp_stack = isotp.NotifierBasedCanStack(bus=bus, notifier=notifier, address=tp_addr)
+    connection = PythonIsoTpConnection(isotp_stack)
 
     # Configure UDS client with HexDidCodec as default
     from udsoncan.configs import default_client_config
@@ -61,10 +87,51 @@ def create_uds_client(
     config["data_identifiers"] = {"default": HexDidCodec}
     config["input_output"] = {"default": {"codec": HexDidCodec}}
 
-    # Create UDS client
     client = Client(connection, config=config)
+    client.open()
 
-    return bus, client
+    cleanup = {
+        "connection": connection,
+        "isotp_stack": isotp_stack,
+        "notifier": notifier,
+        "demo_server": demo_server,
+    }
+    return bus, client, cleanup
+
+
+def shutdown_uds_client(
+    bus: can.BusABC, client: Client, cleanup: dict[str, Any] | None = None
+) -> None:
+    """Close a CLI UDS client and release CAN resources."""
+    try:
+        client.close()
+    except Exception as e:
+        logger.debug(f"Error closing client: {e}")
+    if cleanup:
+        if cleanup.get("connection"):
+            try:
+                cleanup["connection"].close()
+            except Exception as e:
+                logger.debug(f"Error closing connection: {e}")
+        if cleanup.get("isotp_stack"):
+            try:
+                cleanup["isotp_stack"].stop()
+            except Exception as e:
+                logger.debug(f"Error stopping ISO-TP stack: {e}")
+        if cleanup.get("notifier"):
+            try:
+                cleanup["notifier"].stop()
+            except Exception as e:
+                logger.debug(f"Error stopping notifier: {e}")
+    try:
+        bus.shutdown()
+    except Exception as e:
+        logger.debug(f"Error shutting down bus: {e}")
+    if cleanup and cleanup.get("demo_server"):
+        try:
+            cleanup["demo_server"].stop()
+        except Exception as e:
+            logger.debug(f"Error stopping demo server: {e}")
 
 
 def read_data_by_identifier(
@@ -85,7 +152,7 @@ def read_data_by_identifier(
     :param bitrate: CAN bitrate
     :return: Result dictionary
     """
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         logger.info(
@@ -104,12 +171,17 @@ def read_data_by_identifier(
 
             logger.info(f"Read {len(data)} bytes: {hex_data}")
 
-            return {
+            result: dict[str, Any] = {
                 "status": "success",
                 "did": format_hex_id(did, width=4),
                 "data": hex_data,
                 "length": len(data),
             }
+            representations = format_typed_representations(data)
+            if representations:
+                result["representations"] = representations
+                logger.info(f"Representations: {representations}")
+            return result
         else:
             logger.error(f"DID {format_hex_id(did, width=4)} not in response")
             return {"status": "error", "error": "DID not in response"}
@@ -127,8 +199,7 @@ def read_data_by_identifier(
         logger.error(f"Error reading DID: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def write_data_by_identifier(
@@ -151,7 +222,7 @@ def write_data_by_identifier(
     :param bitrate: CAN bitrate
     :return: Result dictionary
     """
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         logger.info(
@@ -184,8 +255,7 @@ def write_data_by_identifier(
         logger.error(f"Error writing DID: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def ecu_reset(
@@ -212,7 +282,7 @@ def ecu_reset(
         # and the request will be sent but we won't wait for response
         rx_id = tx_id
 
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         reset_names = {
@@ -250,8 +320,7 @@ def ecu_reset(
         logger.error(f"Error performing reset: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def routine_control(
@@ -276,7 +345,7 @@ def routine_control(
     :param bitrate: CAN bitrate
     :return: Result dictionary
     """
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         control_names = {
@@ -318,8 +387,7 @@ def routine_control(
         logger.error(f"Error controlling routine: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def input_output_control(
@@ -344,7 +412,7 @@ def input_output_control(
     :param bitrate: CAN bitrate
     :return: Result dictionary
     """
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         control_names = {
@@ -394,8 +462,7 @@ def input_output_control(
         logger.error(f"Error controlling I/O: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def tester_present(
@@ -420,7 +487,7 @@ def tester_present(
     if rx_id is None or suppress_response:
         rx_id = tx_id
 
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         logger.info(
@@ -457,8 +524,7 @@ def tester_present(
         logger.error(f"Error sending tester present: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def diagnostic_session_control(
@@ -481,7 +547,7 @@ def diagnostic_session_control(
     """
     from udsoncan.services import DiagnosticSessionControl
 
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         session_names = {
@@ -521,8 +587,7 @@ def diagnostic_session_control(
         logger.error(f"Error changing session: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def read_dtc_information(
@@ -543,7 +608,7 @@ def read_dtc_information(
     :param bitrate: CAN bitrate
     :return: Result dictionary
     """
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         logger.info(f"Reading DTCs with status mask: 0x{status_mask:02X}")
@@ -582,8 +647,7 @@ def read_dtc_information(
         logger.error(f"Error reading DTCs: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def security_access_request_seed(
@@ -604,7 +668,7 @@ def security_access_request_seed(
     :param bitrate: CAN bitrate
     :return: Result dictionary with seed
     """
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         logger.info(f"Requesting security seed for level {level}")
@@ -640,8 +704,7 @@ def security_access_request_seed(
         logger.error(f"Error requesting seed: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def security_access_send_key(
@@ -664,7 +727,7 @@ def security_access_send_key(
     :param bitrate: CAN bitrate
     :return: Result dictionary
     """
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         logger.info(f"Sending security key for level {level}")
@@ -693,8 +756,7 @@ def security_access_send_key(
         logger.error(f"Error sending key: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def clear_diagnostic_information(
@@ -715,9 +777,8 @@ def clear_diagnostic_information(
     :param bitrate: CAN bitrate
     :return: Result dictionary
     """
-    from udsoncan.exceptions import NegativeResponseException, TimeoutException
 
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         logger.info(f"Clearing DTCs for group: 0x{group:06X}")
@@ -734,8 +795,7 @@ def clear_diagnostic_information(
         logger.error(f"Error clearing DTCs: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def request_download(
@@ -759,9 +819,8 @@ def request_download(
     :return: Result dictionary with max_block_size
     """
     from udsoncan.common.MemoryLocation import MemoryLocation
-    from udsoncan.exceptions import NegativeResponseException, TimeoutException
 
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         location = MemoryLocation(address=address, memorysize=size, address_format=32)
@@ -789,8 +848,7 @@ def request_download(
         logger.error(f"Error requesting download: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def transfer_data(
@@ -813,9 +871,8 @@ def transfer_data(
     :param bitrate: CAN bitrate
     :return: Result dictionary
     """
-    from udsoncan.exceptions import NegativeResponseException, TimeoutException
 
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         logger.info(f"Transferring data block: sequence={sequence}, size={len(data)}")
@@ -832,8 +889,7 @@ def transfer_data(
         logger.error(f"Error transferring data: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def request_transfer_exit(
@@ -852,9 +908,8 @@ def request_transfer_exit(
     :param bitrate: CAN bitrate
     :return: Result dictionary
     """
-    from udsoncan.exceptions import NegativeResponseException, TimeoutException
 
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         logger.info("Requesting transfer exit")
@@ -871,8 +926,7 @@ def request_transfer_exit(
         logger.error(f"Error requesting transfer exit: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)
 
 
 def flash_firmware(
@@ -911,9 +965,8 @@ def flash_firmware(
     :return: Result dictionary with progress info
     """
     from udsoncan.common.MemoryLocation import MemoryLocation
-    from udsoncan.exceptions import NegativeResponseException, TimeoutException
 
-    bus, client = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
+    bus, client, cleanup = create_uds_client(tx_id, rx_id, interface, channel, bitrate)
 
     try:
         # Step 1: Change session
@@ -1000,5 +1053,4 @@ def flash_firmware(
         logger.error(f"Error flashing firmware: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
     finally:
-        client.close()
-        bus.shutdown()
+        shutdown_uds_client(bus, client, cleanup)

@@ -1,7 +1,7 @@
 """Basic unit tests for UDS extension.
 
 Tests the on-demand connection architecture and core functionality
-without requiring a full mock UDS server.
+without requiring a full demo UDS server.
 """
 
 from zelos_extension_uds.extension import UDSClient

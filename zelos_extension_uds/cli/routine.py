@@ -6,7 +6,14 @@ import sys
 import rich_click as click
 from udsoncan.services import RoutineControl
 
-from ..utils import parse_hex_string, validate_hex_id
+from ..utils import (
+    ENDIANNESS_BIG,
+    ENDIANNESS_CHOICES,
+    PAYLOAD_TYPE_CHOICES,
+    PAYLOAD_TYPE_HEX,
+    parse_typed_payload,
+    validate_hex_id,
+)
 from .operations import routine_control
 
 logger = logging.getLogger(__name__)
@@ -41,7 +48,23 @@ logger = logging.getLogger(__name__)
 @click.option(
     "--data",
     type=str,
-    help="Optional routine data in hex (e.g., '01 02', '0102')",
+    help="Optional routine data. Interpretation depends on --type.",
+)
+@click.option(
+    "--type",
+    "data_type",
+    type=click.Choice(PAYLOAD_TYPE_CHOICES, case_sensitive=False),
+    default=PAYLOAD_TYPE_HEX,
+    show_default=True,
+    help="How to interpret --data. 'hex' = raw hex bytes; numeric types pack to register width.",
+)
+@click.option(
+    "--endian",
+    "endianness",
+    type=click.Choice(ENDIANNESS_CHOICES, case_sensitive=False),
+    default=ENDIANNESS_BIG,
+    show_default=True,
+    help="Byte order for numeric --type values. Ignored for 'hex' and 1-byte types.",
 )
 @click.option(
     "--interface",
@@ -64,6 +87,8 @@ def routine(
     routine_id: str,
     control: str,
     data: str | None,
+    data_type: str,
+    endianness: str,
     interface: str,
     channel: str,
     bitrate: int | None,
@@ -100,10 +125,9 @@ def routine(
         logger.error(f"Invalid routine ID: {routine_id_value['error']}")
         sys.exit(1)
 
-    # Parse optional data
     data_bytes = None
     if data:
-        data_bytes = parse_hex_string(data)
+        data_bytes = parse_typed_payload(data, data_type.lower(), endianness.lower())
         if isinstance(data_bytes, dict):
             logger.error(f"Invalid data: {data_bytes['error']}")
             sys.exit(1)

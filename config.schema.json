@@ -7,8 +7,9 @@
     "interface": {
       "type": "string",
       "title": "CAN Interface",
-      "description": "CAN interface type (e.g. Linux: socketcan, macOS/Windows: pcan)",
+      "description": "CAN interface type. Pick 'demo' to run an embedded ECU simulator with no hardware required.",
       "enum": [
+        "demo",
         "socketcan",
         "pcan",
         "kvaser",
@@ -23,6 +24,43 @@
   "dependencies": {
     "interface": {
       "oneOf": [
+        {
+          "properties": {
+            "interface": {
+              "enum": [
+                "demo"
+              ]
+            },
+            "tx_id": {
+              "type": "string",
+              "title": "TX CAN ID (hex, optional)",
+              "description": "CAN ID for outgoing requests (tester->ECU)",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "default": "0x7E0",
+              "ui:placeholder": "0x7E0"
+            },
+            "rx_id": {
+              "type": "string",
+              "title": "RX CAN ID (hex, optional)",
+              "description": "CAN ID for incoming responses (ECU->tester)",
+              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
+              "default": "0x7E8",
+              "ui:placeholder": "0x7E8"
+            },
+            "log_level": {
+              "type": "string",
+              "title": "Log Level",
+              "description": "Set the logging verbosity level",
+              "enum": [
+                "DEBUG",
+                "INFO",
+                "WARNING",
+                "ERROR"
+              ],
+              "default": "INFO"
+            }
+          }
+        },
         {
           "properties": {
             "interface": {

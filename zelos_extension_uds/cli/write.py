@@ -5,7 +5,14 @@ import sys
 
 import rich_click as click
 
-from ..utils import parse_hex_string, validate_hex_id
+from ..utils import (
+    ENDIANNESS_BIG,
+    ENDIANNESS_CHOICES,
+    PAYLOAD_TYPE_CHOICES,
+    PAYLOAD_TYPE_HEX,
+    parse_typed_payload,
+    validate_hex_id,
+)
 from .operations import write_data_by_identifier
 
 logger = logging.getLogger(__name__)
@@ -35,7 +42,23 @@ logger = logging.getLogger(__name__)
     "--data",
     required=True,
     type=str,
-    help="Data bytes in hex (e.g., '01 02 03 04', '01020304')",
+    help="Data to write. Interpretation depends on --type.",
+)
+@click.option(
+    "--type",
+    "data_type",
+    type=click.Choice(PAYLOAD_TYPE_CHOICES, case_sensitive=False),
+    default=PAYLOAD_TYPE_HEX,
+    show_default=True,
+    help="How to interpret --data. 'hex' = raw hex bytes; numeric types pack to register width.",
+)
+@click.option(
+    "--endian",
+    "endianness",
+    type=click.Choice(ENDIANNESS_CHOICES, case_sensitive=False),
+    default=ENDIANNESS_BIG,
+    show_default=True,
+    help="Byte order for numeric --type values. Ignored for 'hex' and 1-byte types.",
 )
 @click.option(
     "--interface",
@@ -57,6 +80,8 @@ def write(
     rxid: str,
     did: str,
     data: str,
+    data_type: str,
+    endianness: str,
     interface: str,
     channel: str,
     bitrate: int | None,
@@ -65,13 +90,18 @@ def write(
 
     Examples:
 
-      # Write data to DID 0x1234
+      # Write raw hex bytes to DID 0x1234
 
       zelos-extension-uds write --txid 7E0 --rxid 7E8 --id 1234 --data "01 02 03 04"
 
-      # Write with compact hex format
+      # Write a uint16 (big-endian, 2 bytes)
 
-      zelos-extension-uds write --txid 7E0 --rxid 7E8 --id 1234 --data 01020304
+      zelos-extension-uds write --txid 7E0 --rxid 7E8 --id 1234 --data 4660 --type uint16
+
+      # Write a float (4 bytes, little-endian)
+
+      zelos-extension-uds write --txid 7E0 --rxid 7E8 --id 1234 \\
+          --data 3.14 --type float --endian little
     """
     # Parse hex IDs
     tx_id = validate_hex_id(txid)
@@ -89,8 +119,7 @@ def write(
         logger.error(f"Invalid DID: {did_value['error']}")
         sys.exit(1)
 
-    # Parse data bytes
-    data_bytes = parse_hex_string(data)
+    data_bytes = parse_typed_payload(data, data_type.lower(), endianness.lower())
     if isinstance(data_bytes, dict):
         logger.error(f"Invalid data: {data_bytes['error']}")
         sys.exit(1)

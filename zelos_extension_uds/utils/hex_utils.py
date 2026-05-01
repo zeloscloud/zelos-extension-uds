@@ -1,9 +1,49 @@
 """Hex string conversion and validation utilities for UDS operations."""
 
 import logging
+import struct
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# UI-facing choices for typed payload dropdowns. "Hex Bytes" preserves the
+# legacy free-form hex parsing; the rest pack a single scalar big-endian into
+# the register width implied by the type (INT16=2 bytes, FLOAT=4 bytes, etc.).
+PAYLOAD_TYPE_HEX = "hex"
+PAYLOAD_TYPE_CHOICES: list[str] = [
+    PAYLOAD_TYPE_HEX,
+    "int8",
+    "uint8",
+    "int16",
+    "uint16",
+    "int32",
+    "uint32",
+    "int64",
+    "uint64",
+    "float",
+    "double",
+]
+
+ENDIANNESS_BIG = "big"
+ENDIANNESS_LITTLE = "little"
+ENDIANNESS_CHOICES: list[str] = [ENDIANNESS_BIG, ENDIANNESS_LITTLE]
+
+# payload_type -> (struct format char, byte size). Endianness prefix is
+# applied at pack time. Default is big-endian to match HexDidCodec.to_bytes
+# and typical ECU register convention; user-selectable per action.
+_PAYLOAD_FORMATS: dict[str, tuple[str, int]] = {
+    "int8": ("b", 1),
+    "uint8": ("B", 1),
+    "int16": ("h", 2),
+    "uint16": ("H", 2),
+    "int32": ("i", 4),
+    "uint32": ("I", 4),
+    "int64": ("q", 8),
+    "uint64": ("Q", 8),
+    "float": ("f", 4),
+    "double": ("d", 8),
+}
 
 
 def parse_hex_string(hex_str: str) -> bytes | dict[str, Any]:
@@ -42,19 +82,20 @@ def parse_hex_string(hex_str: str) -> bytes | dict[str, Any]:
         return {"error": f"Failed to parse hex string '{hex_str}': {e}"}
 
 
-def format_hex_string(data: bytes, separator: str = " ", prefix: str = "") -> str:
-    """Format bytes as a hex string with optional separator and prefix.
+def format_hex_string(data: bytes) -> str:
+    """Format bytes as a single ``0x``-prefixed hex string.
 
-    :param data: Bytes to format
-    :param separator: Separator between bytes (default: space)
-    :param prefix: Prefix for each byte (e.g., "0x")
-    :return: Formatted hex string
+    Examples: ``b"\\x22"`` → ``"0x22"``, ``b"\\x12\\x34"`` → ``"0x1234"``,
+    ``b""`` → ``""``. The ``0x`` prefix makes it unambiguous the value
+    is hex; no spaces keeps multi-byte payloads compact.
+
+    Input parsing (``parse_hex_string``) is liberal and still accepts
+    space-separated and per-byte-prefixed forms — only the output is
+    canonicalized.
     """
     if not data:
         return ""
-
-    hex_bytes = [f"{prefix}{byte:02X}" for byte in data]
-    return separator.join(hex_bytes)
+    return "0x" + data.hex().upper()
 
 
 def validate_hex_id(hex_id: str | int) -> int | dict[str, Any]:
@@ -121,3 +162,96 @@ def validate_data_length(
         return {"error": f"Data exceeds maximum length of {max_length} bytes (got {data_len})"}
 
     return None
+
+
+def parse_typed_payload(
+    value: str, payload_type: str, endianness: str = ENDIANNESS_BIG
+) -> bytes | dict[str, Any]:
+    """Parse a payload string into bytes based on the selected type.
+
+    "hex" delegates to ``parse_hex_string`` (free-form hex like
+    "01 02 03 04" or "0x1234"); endianness is ignored for hex (positional).
+    Numeric types parse the input as a number and pack with the given
+    endianness into the register width for the type:
+
+    - int8/uint8: 1 byte (endianness no-op)
+    - int16/uint16: 2 bytes
+    - int32/uint32: 4 bytes
+    - int64/uint64: 8 bytes
+    - float: 4 bytes
+    - double: 8 bytes
+
+    Integer inputs accept any base via Python's ``int(s, 0)`` so "1234",
+    "0x4D2", "0b10011010010", and "-1" all work. Float inputs accept
+    standard decimal/scientific notation ("3.14", "1e-3").
+
+    :param value: Input string from the action UI
+    :param payload_type: One of ``PAYLOAD_TYPE_CHOICES`` (case-insensitive)
+    :param endianness: One of ``ENDIANNESS_CHOICES`` (case-insensitive,
+        defaults to Big-Endian)
+    :return: Bytes if successful, error dict if invalid
+    """
+    payload_type = payload_type.lower()
+    endianness = endianness.lower()
+    if payload_type == PAYLOAD_TYPE_HEX:
+        return parse_hex_string(value)
+
+    fmt = _PAYLOAD_FORMATS.get(payload_type)
+    if fmt is None:
+        return {"error": f"Unknown payload type: {payload_type}"}
+
+    fmt_char, _size = fmt
+    cleaned = value.strip()
+    if not cleaned:
+        return {"error": f"Empty value for type {payload_type}"}
+
+    try:
+        num: int | float = (
+            float(cleaned) if payload_type in ("float", "double") else int(cleaned, 0)
+        )
+    except ValueError as e:
+        return {"error": f"Invalid {payload_type} value '{value}': {e}"}
+
+    endian_prefix = "<" if endianness == ENDIANNESS_LITTLE else ">"
+    try:
+        return struct.pack(endian_prefix + fmt_char, num)
+    except struct.error as e:
+        return {"error": f"{payload_type} value out of range '{value}': {e}"}
+
+
+# Read-side: register-width -> list of (label, struct format char). Float is
+# only emitted at sizes where it makes sense (4-byte float, 8-byte double).
+_READ_REPRESENTATIONS: dict[int, list[tuple[str, str]]] = {
+    1: [("uint8", "B"), ("int8", "b")],
+    2: [("uint16", "H"), ("int16", "h")],
+    4: [("uint32", "I"), ("int32", "i"), ("float", "f")],
+    8: [("uint64", "Q"), ("int64", "q"), ("double", "d")],
+}
+
+
+def format_typed_representations(data: bytes) -> dict[str, Any]:
+    """Decode a response payload into all natural numeric representations.
+
+    Emits keys like ``uint16_be`` / ``uint16_le`` / ``int16_be`` /
+    ``int16_le`` for 2-byte payloads, plus ``float_be`` / ``float_le`` for
+    4-byte and ``double_be`` / ``double_le`` for 8-byte. 1-byte payloads
+    emit ``uint8`` / ``int8`` (no endianness). Returns an empty dict for
+    payload sizes that don't map to a natural scalar (0, 3, 5+ excluding
+    8 etc.) so callers can omit the field cleanly.
+
+    :param data: Response bytes from the ECU
+    :return: Mapping of representation label -> decoded value
+    """
+    size = len(data)
+    specs = _READ_REPRESENTATIONS.get(size)
+    if specs is None:
+        return {}
+
+    out: dict[str, Any] = {}
+    for label, fmt_char in specs:
+        if size == 1:
+            out[label] = struct.unpack(fmt_char, data)[0]
+        else:
+            out[f"{label}_be"] = struct.unpack(">" + fmt_char, data)[0]
+            out[f"{label}_le"] = struct.unpack("<" + fmt_char, data)[0]
+    return out
