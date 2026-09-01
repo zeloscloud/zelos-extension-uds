@@ -5,6 +5,7 @@ for configuring log levels across the extension.
 """
 
 import logging
+import time
 
 from zelos_sdk.hooks.logging import TraceLoggingHandler
 
@@ -14,8 +15,13 @@ from zelos_sdk.hooks.logging import TraceLoggingHandler
 _trace_handler = TraceLoggingHandler("uds_log")
 _trace_handler.setLevel(logging.DEBUG)
 
-# Set up root logger with default INFO level
-logging.basicConfig(level=logging.INFO)
+# UTC ISO 8601 with ms, matching the SDK's Rust tracing lines in the same log stream
+logging.Formatter.converter = time.gmtime
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s.%(msecs)03dZ %(levelname)5s %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
 logging.getLogger().addHandler(_trace_handler)
 
 
