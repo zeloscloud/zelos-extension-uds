@@ -1,4 +1,4 @@
-# Zelos Extension Manifest
+# Zelos UDS Extension Manifest
 # See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/ for full documentation
 
 name = "UDS"
@@ -16,18 +16,25 @@ readme = "README.md"
 
 # Compatibility (optional, defaults to ^25.0.20)
 [zelos]
-version = ">=25.0.22-0"
+version = ">=26.0.8"
 
 # Configuration schema (enables UI in Zelos App)
 [config]
 schema = "config.schema.json"
 
-# Runtime configuration
-[runtime]
-type = "python"
+[host]
+type = "agent"
+
+[host.agent]
 entry = "main.py"
 python_version = "3.11"
 
 # Graceful shutdown configuration (optional, defaults to 10)
 [stop]
 grace_seconds = 10
+
+[package]
+paths = [
+    "main.py",
+    "zelos_extension_uds",
+]

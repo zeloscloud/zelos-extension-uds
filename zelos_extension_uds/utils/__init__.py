@@ -11,7 +11,6 @@ from .hex_utils import (
     format_typed_representations,
     parse_hex_string,
     parse_typed_payload,
-    validate_data_length,
     validate_hex_id,
 )
 
@@ -27,5 +26,4 @@ __all__ = [
     "format_typed_representations",
     "validate_hex_id",
     "format_hex_id",
-    "validate_data_length",
 ]

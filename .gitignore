@@ -252,3 +252,7 @@ __marimo__/
 # Zelos
 .last_config
 config.json
+actions.json
+
+# Agent worktrees and local settings
+.claude/

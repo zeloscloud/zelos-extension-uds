@@ -1,158 +1,41 @@
 # Contributing
 
-## First Commit
+## Prerequisites
 
-All files are staged and ready. Create your first commit:
+- [Zelos CLI](https://docs.zeloscloud.io/cli)
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/)
+- [just](https://github.com/casey/just)
 
-```bash
-git commit -m "Initial commit"
-```
-
-## Push to GitHub
-
-Create a repository on GitHub, then:
+## Setup
 
 ```bash
-git remote add origin git@github.com:zelos/zelos-extension-uds.git
-git push -u origin main
+git clone https://github.com/zeloscloud/zelos-extension-uds
+just install
 ```
 
-## Development Workflow
+## Commands
 
-```bash
-just install  # Install dependencies and setup
-just dev      # Run locally
-just test     # Run tests
-just check    # Lint code
-```
+| Command                | Description                                 |
+| ---------------------- | ------------------------------------------- |
+| `just install`         | Install dependencies and pre-commit hooks   |
+| `just dev`             | Run extension locally                       |
+| `just sim`             | Run the demo ECU on vcan0                   |
+| `just format`          | Format code with ruff                       |
+| `just check`           | Lint with ruff                              |
+| `just test`            | Run tests with pytest                       |
+| `just package`         | Package for Zelos marketplace               |
+| `just release VERSION` | Bump version, check, test, commit, and tag  |
+| `just clean`           | Remove build artifacts                      |
 
-1. Make your changes
-2. Run `just format` to auto-format
-3. Run `just test` to verify tests pass
-4. Commit your changes (pre-commit hooks run automatically)
+## Configuration
 
-## Project Structure
+Edit `config.schema.json` to define your extension's configuration options. The schema drives the configuration UI in the Zelos desktop app. See the [configuration docs](https://docs.zeloscloud.io/sdk/how-to/develop-extensions/#configuration) for the full widget reference.
 
-```
-zelos-extension-uds/
-├── extension.toml                  # Extension metadata and version
-├── config.schema.json              # Configuration UI schema
-├── main.py                         # Entry point
-├── pyproject.toml                  # Python dependencies
-├── uv.lock                         # Locked dependency versions
-├── Justfile                        # Development commands
-├── LICENSE                         # MIT License
-├── README.md                       # User documentation
-├── CHANGELOG.md                    # Version history
-├── CONTRIBUTING.md                 # This file
-├── .pre-commit-config.yaml         # Git hook configuration
-├── .gitignore                      # Git ignore rules
-├── zelos_extension_uds/  # Your extension package
-│   ├── __init__.py
-│   ├── extension.py                # Main extension logic
-│   └── utils/                      # Utility modules
-│       └── __init__.py
-├── tests/                          # Test suite
-│   └── test_extension.py
-├── scripts/                        # Build and release scripts
-│   ├── package_extension.py        # Creates marketplace tarball
-│   └── bump_version.py             # Updates version numbers
-├── assets/                         # Icons and media
-│   └── icon.png                    # Marketplace icon
-├── .github/                        # GitHub automation
-│   ├── workflows/
-│   │   ├── CI.yml                  # Run tests on PR
-│   │   └── release.yml             # Publish releases
-│   └── dependabot.yml              # Dependency updates
-└── .vscode/                        # VSCode settings
-    ├── settings.json
-    └── extensions.json
-```
-
-## Common Tasks
-
-### Run Locally
-
-```bash
-just dev
-```
-
-Press Ctrl+C to stop.
-
-### Add a Dependency
-
-```bash
-uv add package-name        # Runtime dependency
-uv add --dev package-name  # Dev dependency
-```
-
-### Package for Marketplace
+## Packaging
 
 ```bash
 just package
 ```
 
-This creates a `.tar.gz` file ready to upload to the Zelos Marketplace (automatically happens in CI!)
-
-### Create a Release
-
-```bash
-just release 1.0.0
-git push --follow-tags
-```
-
-This updates version numbers, runs tests, and creates a git tag.
-
-## Testing
-
-### Write Tests
-
-```python
-# tests/test_feature.py
-from zelos_extension_uds.extension import MyExtension
-
-def test_something():
-    extension = MyExtension({"setting": "value"})
-    assert extension.do_something() == expected_result
-```
-
-### Run Tests
-
-```bash
-just test           # Run all tests
-uv run pytest -v    # Verbose output
-uv run pytest -k test_name  # Run specific test
-```
-
-## Code Quality
-
-### Formatting & Linting
-
-```bash
-just format  # Auto-fix formatting
-just check   # Check for issues
-```
-
-Pre-commit hooks run automatically on `git commit` and will:
-- Format code with ruff
-- Check for common issues
-- Validate YAML/TOML/JSON files
-
-### Type Hints
-
-Use type hints on all function signatures:
-
-```python
-def my_function(name: str, count: int) -> list[str]:
-    return [name] * count
-```
-
-## Getting Help
-
-- [Zelos Docs](https://docs.zeloscloud.io)
-- [SDK Guide](https://docs.zeloscloud.io/sdk)
-- [GitHub Issues](https://github.com/zelos/zelos-extension-uds/issues)
-
-## License
-
-MIT - see [LICENSE](LICENSE)
+The archive lands next to `extension.toml` as `{name}-{version}.tar.gz`.

@@ -1,127 +1,157 @@
-# Zelos Unified Diagnostic Services (UDS) Extension
+# Zelos UDS
 
-A Zelos extension implementing UDS (ISO 14229) diagnostic protocol over CAN with ISO-TP transport, built with the [Zelos SDK](https://docs.zeloscloud.io/sdk).
+A Zelos extension for UDS (ISO 14229) diagnostics over CAN with ISO-TP (ISO 15765-2). Sessions, DIDs, routines, DTCs, security access and firmware download, from the Zelos App, app extensions or the shell.
 
 ## Features
 
-- **UDS Services**: Session Control, Read/Write Data By Identifier, ECU Reset, Routine Control, I/O Control, Tester Present, DTC Reading/Clearing, Security Access, Firmware Flashing
-- **CAN Integration**: ISO-TP transport, configurable interfaces (socketcan, PCAN, Kvaser, Vector)
-- **Zelos Integration**: Interactive actions via Zelos App
-- **CLI**: Execute UDS transactions programmatically from the CLI
+- **ECUs in parallel**: One entry per UDS server (request/response CAN id pair). ECUs on one interface and channel share one bus
+- **CAN adapters**: Classic CAN and CAN FD through the CAN extension's adapters (SocketCAN, SocketCAN over SSH, PCAN, Kvaser, Vector, slcan, any python-can interface)
+- **Persistent session**: The bus opens at start and stays open; requests to one ECU are serialized; periodic tester present holds non-default sessions
+- **Typed payloads**: Writes and options as hex or packed integers/floats; reads decoded as every fitting integer/float type
+- **Demo ECU**: A built-in simulated ECU to try every action without hardware
+
+## Quick Start
+
+```bash
+git clone https://github.com/zeloscloud/zelos-extension-uds
+cd zelos-extension-uds
+just install
+uv run main.py --demo
+```
 
 ## Configuration
 
-Configure via Zelos App settings or `config.json`:
+All configuration is managed through the Zelos App settings interface.
+
+### Per-ECU Settings
 
 | Setting | Default | Description |
-|---------|---------|-------------|
-| `interface` | `socketcan` | CAN interface (socketcan, pcan, kvaser, vector) |
-| `channel` | `can0` | CAN channel/device |
-| `bitrate` | `500000` | CAN bitrate (bps) |
-| `tx_id` | `0x7E0` | Tester CAN ID |
-| `rx_id` | `0x7E8` | ECU CAN ID |
+|---|---|---|
+| **Interface** | | SocketCAN (Linux), SocketCAN over SSH, PCAN, Kvaser, Vector, slcan (serial), Other (python-can: any interface, python-can's own `socketcan` included), Demo |
+| **Name** | CAN channel (the remote one over SSH) or `demo` | Name the actions take as `ecu`, and the trace segment. Letters, digits, space, `_`, `-` only |
+| **Channel**, **Bitrate**, **CAN-FD Mode**, **Advanced Configuration (JSON)** | as the CAN extension | The adapter, with the CAN extension's fields and defaults. The SocketCAN channel picker lists this machine's interfaces |
+| **Request CAN ID** / **Response CAN ID** | `0x7E0` / `0x7E8` | Tester-to-ECU and ECU-to-tester ids, hex. Physical addressing |
+| **Extended IDs** | off | The two ids are 29-bit |
+| **Seed/Key File** | none | A Python file on the agent's host defining `key(level: int, seed: bytes) -> bytes`, loaded at start. Answers seeds in `security_access` (no key given) and `flash_firmware`. It runs in the extension's process. Keys are never logged |
 
-Advanced settings (optional):
-- `request_timeout`, `p2_timeout`, `p2_star_timeout` - UDS timeouts
-- `isotp_stmin`, `isotp_blocksize` - ISO-TP flow control
-- `isotp_tx_padding`, `isotp_rx_padding`, `isotp_padding_value` - Frame padding
+ECUs on one interface and channel share one bus: their bitrate, CAN-FD and SSH settings must match, and no CAN id may be used by two of them. Behaviour and limits: [docs/behaviour.md](docs/behaviour.md).
 
-See [config.schema.json](config.schema.json) for complete schema.
+### Advanced Settings
 
-## UDS Protocol Reference
+One value each, applied to every ECU.
 
-Supported services per ISO 14229:
+| Setting | Default | Description |
+|---|---|---|
+| `prefix` | `UDS` | Trace source every ECU publishes under |
+| `log_level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `request_timeout` | `5.0` | Seconds a request may take in total, response-pending included |
+| `p2_timeout` | `1.0` | Seconds to the start of the response (its first frame); the rest of a multi-frame response follows at the ECU's pace |
+| `p2_star_timeout` | `5.0` | Seconds after each response-pending (NRC 0x78) |
+| `isotp_stmin` | `0` | STmin (ms) in our flow control frames |
+| `isotp_blocksize` | `0` | Block size in our flow control frames; 0: all, one flow control per message |
+| `isotp_padding` | none | Pad sent frames to 8 bytes with this byte; none: unpadded |
+| `tester_present_s` | none | Periodic tester present to every ECU from the start; none: off |
+| `debug_frames` | off | Log every request, response and ISO-TP frame at `DEBUG` |
 
-| Service | ID | Description |
-|---------|-----|-------------|
-| DiagnosticSessionControl | 0x10 | Change diagnostic session |
-| ECUReset | 0x11 | Reset ECU |
-| ClearDiagnosticInformation | 0x14 | Clear diagnostic trouble codes |
-| ReadDTCInformation | 0x19 | Read diagnostic trouble codes |
-| ReadDataByIdentifier | 0x22 | Read data by DID |
-| SecurityAccess | 0x27 | Request security access (seed/key) |
-| WriteDataByIdentifier | 0x2E | Write data by DID |
-| InputOutputControlByIdentifier | 0x2F | Control I/O signals |
-| RoutineControl | 0x31 | Control diagnostic routines |
-| RequestDownload | 0x34 | Initiate firmware download |
-| TransferData | 0x36 | Transfer firmware data blocks |
-| RequestTransferExit | 0x37 | Finalize firmware transfer |
-| TesterPresent | 0x3E | Keep session alive |
+Settings from 0.1.x (one flat ECU with lowercase interface names) are read as one ECU, with a warning; save the settings to update them.
 
-### Standard CAN IDs
+### Trace layout
 
-| ID Range | Purpose |
-|----------|---------|
-| 0x7DF | Functional (broadcast) request |
-| 0x7E0-0x7E7 | Physical request IDs |
-| 0x7E8-0x7EF | Physical response IDs |
+| What | Prefix `UDS` | Prefix cleared |
+|---|---|---|
+| Requests | `UDS/<ecu>/tx` | `<ecu>/tx` |
+| Responses | `UDS/<ecu>/rx` | `<ecu>/rx` |
+| Extension logs | `UDS/log` | `uds_log/log` |
 
-### Common Negative Response Codes
+| Field | Event | Meaning |
+|---|---|---|
+| `service_id`, `service_name` | tx, rx | Service, e.g. `0x22` `ReadDataByIdentifier` |
+| `parameter` | tx, rx | What the request addresses: DID (0x22, 0x2E, 0x2F), routine id (0x31), memory address (0x23, 0x3D, 0x34, 0x35), block sequence (0x36), DTC group (0x14), else the sub-function (0x10, 0x11, 0x19, 0x27, 0x28, 0x3E, 0x85); 0 for 0x37 |
+| `data` | tx, rx | tx: the whole request after the SID. rx: the whole response after the SID (for a negative one, after 0x7F: the SID and the NRC) |
+| `success`, `nrc` | rx | Positive response; the negative response code, 0 when positive |
+| `elapsed_ms` | rx | Request to final response, response-pending included |
 
-| Code | Name | Description |
-|------|------|-------------|
-| 0x11 | serviceNotSupported | Service not supported in current session |
-| 0x13 | incorrectMessageLengthOrInvalidFormat | Invalid message format |
-| 0x22 | conditionsNotCorrect | Preconditions not met |
-| 0x31 | requestOutOfRange | Parameter out of range |
-| 0x33 | securityAccessDenied | Security access required |
-| 0x78 | requestCorrectlyReceived-ResponsePending | Request pending |
+A timed-out or suppressed request has a `tx` row and no `rx` row.
 
-## Links
+## Actions
 
-- [Zelos Documentation](https://docs.zeloscloud.io)
-- [Zelos SDK Guide](https://docs.zeloscloud.io/sdk)
-- [ISO 14229 Specification](https://www.iso.org/standard/72439.html)
-- [udsoncan Library](https://github.com/pylessard/python-udsoncan)
-- [python-can Documentation](https://python-can.readthedocs.io/)
+Available from the Zelos App and to app extensions as `UDS/<action>`, whatever the trace prefix. Each takes `ecu`; fields with a default are optional. A negative response returns `status: error` with `nrc` and `nrc_name`.
+
+| Action | Service | Description |
+|---|---|---|
+| `list_ecus` | | Configured ECUs: name, interface, endpoint, ids, state |
+| `get_status` | | State, last error, ids, periodic tester present, counters (`requests` sent, `responses` = `positive` + `negative`, `timeouts`, `errors`). Sends nothing |
+| `session_control` | 0x10 | Default, programming, extended, safety system |
+| `read_did` | 0x22 | Hex, and integer/float readings of 1, 2, 4 and 8-byte values |
+| `write_did` | 0x2E | Hex or a typed number, big or little endian |
+| `ecu_reset` | 0x11 | Hard, soft, key off/on |
+| `routine_control` | 0x31 | Start, stop, request results; optional typed data |
+| `io_control` | 0x2F | Return control, reset to default, freeze, short-term adjustment |
+| `tester_present` | 0x3E | Once, optionally with suppressed response |
+| `periodic_tester_present` | 0x3E | Start or stop, suppressed response, 0.5 to 10 s; `state` started, stopped or inactive |
+| `read_dtc` | 0x19 | `report`: by status mask (02), number by mask (01), snapshot ids (03), snapshot by DTC (04) and extended data by DTC (06) as raw hex records, supported (0A) |
+| `clear_dtc` | 0x14 | One group, `FFFFFF` for all |
+| `control_dtc_setting` | 0x85 | On or off |
+| `communication_control` | 0x28 | Enable/disable Rx and Tx; normal, network management or both |
+| `security_access` | 0x27 | Level as the odd requestSeed sub-function (`0x01`, `0x11`). Key given: sent. Empty: the seed is requested, and answered with the key file when set |
+| `read_memory`, `write_memory` | 0x23, 0x3D | 4-byte address, size in 1, 2 or 4 bytes (ALFID 0x14, 0x24, 0x44) |
+| `request_download`, `request_upload` | 0x34, 0x35 | Address and size; returns the ECU's block length |
+| `transfer_data` | 0x36 | One block: sends data, or (empty) returns an upload block |
+| `request_transfer_exit` | 0x37 | Ends a transfer |
+| `upload_memory` | 0x35 0x36 0x37 | Whole upload; written to a file path on the agent's host, else returned as hex up to 4096 bytes |
+| `flash_firmware` | | Image from a file on the agent's host or hex. Extended then programming session, security (level `0x11`, key or key file; skipped with neither), optional erase routine (off by default; e.g. `0xFF00`, record ALFID 0x44 + address + size), download, exit, check routine (`0xFF01`, record CRC32 of the image; a non-zero first result byte fails), optional reset. Each step in `steps`; the first failure ends it, named in `failed_step`. Nothing else is sent to the ECU meanwhile |
+| `auto_config` | | One demo ECU with its seed/key file, for the config form's Auto-configure. Runs with the extension stopped |
+| `list_interfaces` | | This machine's SocketCAN interfaces, for the Channel picker. Runs with the extension stopped |
 
 ## CLI Usage
 
-The extension includes a command-line interface for executing UDS transactions. No installation required - just use `uv run`:
-
-> **Tip:** Run `pip install .` to install and use `zelos-extension-uds <args>` from anywhere.
-
 ```bash
-# Change to extended diagnostic session
-uv run main.py session --txid 7E0 --rxid 7E8 --type extended
+uv run main.py                     # app mode with the config from the Zelos App
+uv run main.py --demo              # add a demo ECU
+uv run main.py --demo --file       # record to a UTC-stamped .trz
 
-# Read VIN (DID 0xF190)
+# One request from the shell; prints the result as JSON, exit 1 on error
 uv run main.py read --txid 7E0 --rxid 7E8 --id F190
-
-# Write data
-uv run main.py write --txid 7E0 --rxid 7E8 --id 1234 --data 01020304
-
-# Read DTCs
-uv run main.py dtc --txid 7E0 --rxid 7E8
-
-# Clear DTCs
-uv run main.py clear --txid 7E0 --rxid 7E8
-
-# Request security seed
-uv run main.py security --txid 7E0 --rxid 7E8 --level 1 --seed
-
-# Send security key
-uv run main.py security --txid 7E0 --rxid 7E8 --level 1 --key 01020304
-
-# ECU reset
-uv run main.py reset --txid 7E0 --rxid 7E8 --response-required --type hard
-
-# Flash firmware
-uv run main.py flash --txid 7E0 --rxid 7E8 --file firmware.bin --address 08000000
-
-# Start routine
-uv run main.py routine --txid 7E0 --rxid 7E8 --id 0203 --control start --data 0102
-
-# I/O control
-uv run main.py io --txid 7E0 --rxid 7E8 --id 1234 --control freeze
-
-# Tester present
-uv run main.py tp --txid 7E0 --rxid 7E8
+uv run main.py read --interface zelos-socketcan --channel can0 --txid 7E0 --rxid 7E8 --id F190
+uv run main.py read --interface demo --txid 7E0 --rxid 7E8 --id F190
+uv run main.py flash --interface pcan --channel PCAN_USBBUS1 --bitrate 500000 \
+    --txid 7E0 --rxid 7E8 --file fw.bin --address 08000000
 ```
 
-**Available subcommands:** `session`, `read`, `write`, `reset`, `routine`, `io`, `tp`, `dtc`, `clear`, `security`, `flash`
+| Subcommand | Service |
+|---|---|
+| `session`, `reset`, `tp` | 0x10, 0x11, 0x3E |
+| `read`, `write` | 0x22, 0x2E (`--type`, `--endian`) |
+| `routine`, `io` | 0x31, 0x2F |
+| `dtc`, `clear` | 0x19 (`--report`), 0x14 |
+| `dtc-setting`, `comm` | 0x85, 0x28 |
+| `read-mem`, `write-mem`, `upload` | 0x23, 0x3D, 0x35 0x36 0x37 |
+| `security` | 0x27 (`--seed`, `--key`, `--key-file`) |
+| `flash` | As `flash_firmware`, erase and check opt-in (`--key-file`, `--erase-routine`, `--check-routine`, `--reset`) |
+| `demo-ecu` | Runs the demo ECU on any python-can bus |
 
-All hex values accept formats: `7E0`, `0x7E0`, `01020304`, `0x01020304`
+Every subcommand takes `--interface` (a settings label or `socketcan` (same as `zelos-socketcan`), `zelos-ssh-socketcan`, `pcan`, `kvaser`, `vector`, `slcan`, `other`, `demo`; any other name is passed to python-can, e.g. `ixxat`, `gs_usb`), `--channel`, `--bitrate`, `--fd`, `--data-bitrate`, `--txid`, `--rxid`, `--extended`. `zelos-ssh-socketcan` needs `--remote-host` (`--ssh-user`, `--ssh-port` optional; `--channel` is the remote interface); `other` takes `--config-json`. `--interface demo` runs the demo ECU inside the command.
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Demo ECU
+
+`zelos_extension_uds/demo/` is the bench DC-DC's UDS server in Python, to its firmware's contract, with its seed/key file. It backs the Demo interface and the tests: [docs/behaviour.md](docs/behaviour.md#demo-ecu).
+
+The zelos-examples UDS conformance suite is vendored in `tests/conformance` and runs against the demo in `just test`. Update it with `just sync-conformance ~/zelos/zelos-examples`; `ZELOS_EXAMPLES=<checkout> just test` also checks the copy against upstream.
+
+```bash
+just sim                                           # vcan0, Linux
+uv run main.py demo-ecu --help                     # --interface, --channel, --fd, --extended, --rx-id, --tx-id, --stmin
+```
+
+## Links
+
+- **Repository**: [github.com/zeloscloud/zelos-extension-uds](https://github.com/zeloscloud/zelos-extension-uds)
+- **Issues**: [Report bugs or request features](https://github.com/zeloscloud/zelos-extension-uds/issues)
+- [Zelos Documentation](https://docs.zeloscloud.io)
 
 ## License
 

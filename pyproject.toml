@@ -2,49 +2,54 @@
 name = "zelos-extension-uds"
 version = "0.1.8"
 description = "Unified Diagnostic Services (UDS) extension for Zelos"
-authors = [{ name = "zelos", email = "info@zeloscloud.io" }]
+authors = [{ name = "zeloscloud", email = "info@zeloscloud.io" }]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-keywords = ["zelos", "extension"]
+keywords = ["zelos", "extension", "uds", "iso-tp", "diagnostics", "automotive"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "zelos-sdk",
-    "udsoncan>=1.21.0",
-    "python-can>=4.0.0",
-    "can-isotp>=2.0.0",
+    # Standalone actions need the at-rest harness (`zelos_sdk.extensions.actions`).
+    "zelos-sdk>=0.0.12a3",
     "rich-click>=1.8.0",
+    # CAN bus runtime (`zelos_can.bus`), python-can included through the extra.
+    "zelos-can[python-can]>=0.0.11a5",
+    "can-isotp>=2.0.0",
+    "udsoncan>=1.21.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/zelos/zelos-extension-uds"
-Repository = "https://github.com/zelos/zelos-extension-uds"
-Issues = "https://github.com/zelos/zelos-extension-uds/issues"
+Homepage = "https://github.com/zeloscloud/zelos-extension-uds"
+Repository = "https://github.com/zeloscloud/zelos-extension-uds"
+Issues = "https://github.com/zeloscloud/zelos-extension-uds/issues"
 Documentation = "https://docs.zeloscloud.io/extensions"
-
-[project.scripts]
-zelos-extension-uds = "main:cli"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.4.2",
     "pre-commit>=4.3.0",
     "ruff>=0.14.2",
+    "jsonschema>=4.0.0",
+    # The vendored conformance suite (tests/conformance) imports these.
+    "cantools>=41.3.1",
+    "pyxcp==0.29.19",
     "tomli>=2.3.0; python_version < '3.11'",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+required-version = ">=0.9.5"
 
 [tool.hatch.build.targets.wheel]
 packages = ["zelos_extension_uds"]
@@ -56,6 +61,8 @@ addopts = "--log-cli-level=INFO"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Vendored as is from zelos-examples; edited there.
+extend-exclude = ["tests/conformance/testing"]
 
 [tool.ruff.lint]
 select = [
@@ -71,9 +78,6 @@ select = [
 ignore = [
     "B008",   # function call in defaults (common in decorators)
 ]
-
-[tool.ruff.lint.per-file-ignores]
-"scripts/*.py" = ["PTH123"]  # Allow open() in scripts
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
