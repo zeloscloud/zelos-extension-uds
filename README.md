@@ -172,10 +172,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 `zelos_extension_uds/demo/` is the bench DC-DC's UDS server in Python, to its firmware's contract, with its seed/key file. It backs the Demo interface and the tests: [docs/behaviour.md](docs/behaviour.md#demo-ecu).
 
-The zelos-examples UDS conformance suite is vendored in `tests/conformance` and runs against the demo in `just test`. Update it with `just sync-conformance ~/zelos/zelos-examples`; `ZELOS_EXAMPLES=<checkout> just test` also checks the copy against upstream.
+The zelos-examples UDS conformance suite is vendored in `tests/conformance` and runs against the demo in `just test`, on CAN and over DoIP through the DoIP entity simulator (`tests/doip_entity.py`: tester 0x0E80, ECU 0x1001). Update it with `just sync-conformance ~/zelos/zelos-examples`; `ZELOS_EXAMPLES=<checkout> just test` also checks the copy against upstream.
 
 ```bash
 just sim                                           # vcan0, Linux
+just sim-doip                                      # DoIP entity on 127.0.0.1:13400 (TCP, UDP)
 uv run main.py demo-ecu --help                     # --interface, --channel, --fd, --extended, --rx-id, --tx-id, --stmin
 ```
 
