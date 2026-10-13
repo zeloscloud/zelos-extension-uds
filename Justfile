@@ -38,6 +38,10 @@ dev:
 sim *ARGS="--interface socketcan --channel vcan0":
     uv run python main.py demo-ecu {{ARGS}}
 
+# Run the DoIP entity simulator (the demo ECU over DoIP), e.g. --host 0.0.0.0
+sim-doip *ARGS="--host 127.0.0.1":
+    uv run python tests/doip_entity.py {{ARGS}}
+
 # Vendor the UDS conformance suite from a zelos-examples checkout, e.g. ~/zelos/zelos-examples
 sync-conformance PATH:
     uv run python tests/conformance/vendor.py {{PATH}}

@@ -55,7 +55,7 @@
 
 ## Demo ECU
 
-The bench DC-DC's UDS server, ported to Python: the contract is the firmware's (zelos-examples `nodes/dcdc/src/uds.c`, `lib/uds/core/uds_core.c`; the server contract in the UDS design), not repeated here. The zelos-examples conformance suite, vendored in `tests/conformance`, runs against it in CI: 55 pass, 8 skip (they need the DC-DC node's own frames).
+The bench DC-DC's UDS server, ported to Python: the contract is the firmware's (zelos-examples `nodes/dcdc/src/uds.c`, `lib/uds/core/uds_core.c`; the server contract in the UDS design), not repeated here. The zelos-examples conformance suite, vendored in `tests/conformance`, runs against it in CI on CAN: 56 pass, 8 skip (they need the DC-DC node's own frames); and over DoIP behind the DoIP entity simulator (`tests/doip_entity.py`): 55 pass, 9 skip (also the one reading the ECU's response frames off the bus).
 
 | Item | Demo |
 |---|---|
