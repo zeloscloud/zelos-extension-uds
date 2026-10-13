@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zelos UDS extension - Unified Diagnostic Services over CAN."""
+"""Zelos UDS extension - Unified Diagnostic Services over CAN or DoIP."""
 
 import logging
 import time
@@ -43,7 +43,7 @@ logging.basicConfig(
 )
 @click.pass_context
 def cli(ctx: click.Context, demo: bool, file: Path | None) -> None:
-    """UDS (ISO 14229) diagnostics over CAN with ISO-TP.
+    """UDS (ISO 14229) diagnostics over CAN with ISO-TP, or over DoIP.
 
     Without a subcommand: app mode, configured via Zelos extension settings, or
     --demo for testing. With one: a single request (or flash) from the shell.
