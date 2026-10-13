@@ -41,6 +41,8 @@ def test_schema_defaults_match_advanced_defaults():
         {"interface": "slcan (serial)", "channel": "/dev/ttyACM0", "bitrate": 500000, **CAN},
         {"interface": "Other (python-can)", "config_json": '{"interface": "ixxat"}',
          "tx_id": "18DA10F1", "rx_id": "18DAF110", "extended_ids": True},
+        {"interface": "DoIP", "doip": {"host": "192.168.77.2", "ecu_address": "0x1001"}},
+        {"interface": "DoIP", "doip": {"discover": True}},
     ],
 )  # fmt: skip
 def test_schema_accepts(ecu):

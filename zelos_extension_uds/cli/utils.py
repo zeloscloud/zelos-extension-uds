@@ -14,7 +14,7 @@ from typing import Any
 
 import rich_click as click
 
-from ..client import STOP_BOUND, SharedBus, State, UdsEcu
+from ..client import STOP_BOUND, DoipLink, SharedBus, State, UdsEcu
 from ..constants import CLI_INTERFACES, INTERFACES, Interface
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,8 @@ def _label(ctx: click.Context, param: click.Parameter, value: str) -> str:
 
 
 def ecu_options(func: Callable[..., Any]) -> Callable[..., Any]:
-    """The ECU a subcommand talks to: interface, channel, bitrate, FD and CAN ids."""
+    """The ECU a subcommand talks to: interface, channel, bitrate, FD and CAN ids, or DoIP
+    host and logical addresses."""
     options = [
         click.option(
             "--interface",
@@ -83,8 +84,8 @@ def ecu_options(func: Callable[..., Any]) -> Callable[..., Any]:
             show_default=True,
             callback=_label,
             help="Interface: a label from the settings form, or socketcan (zelos-socketcan), "
-            "zelos-ssh-socketcan, pcan, kvaser, vector, slcan, other, demo; any other name "
-            "is a python-can interface (ixxat, gs_usb, virtual, ...)",
+            "zelos-ssh-socketcan, pcan, kvaser, vector, slcan, other, demo, doip; any other "
+            "name is a python-can interface (ixxat, gs_usb, virtual, ...)",
         ),
         click.option("--channel", default="can0", show_default=True, help="CAN channel/device"),
         click.option("--remote-host", default=None, help="zelos-ssh-socketcan: SSH host"),
@@ -94,9 +95,30 @@ def ecu_options(func: Callable[..., Any]) -> Callable[..., Any]:
         click.option("--bitrate", type=int, default=None, help="CAN bitrate in bit/s"),
         click.option("--fd", is_flag=True, help="CAN FD: ISO-TP frames up to 64 bytes"),
         click.option("--data-bitrate", type=int, default=None, help="CAN FD data bitrate"),
-        click.option("--txid", required=True, help="Request CAN ID, hex (tester to ECU): 7E0"),
-        click.option("--rxid", required=True, help="Response CAN ID, hex (ECU to tester): 7E8"),
+        click.option("--txid", help="Request CAN ID, hex (tester to ECU): 7E0. Not for doip"),
+        click.option("--rxid", help="Response CAN ID, hex (ECU to tester): 7E8. Not for doip"),
         click.option("--extended", is_flag=True, help="29-bit CAN ids"),
+        click.option("--host", default="", help="doip: the DoIP entity's IP or hostname"),
+        click.option("--port", type=int, default=13400, show_default=True, help="doip: TCP port"),
+        click.option(
+            "--tester-address",
+            default="0E80",
+            show_default=True,
+            help="doip: our logical address, hex",
+        ),
+        click.option("--ecu-address", default="", help="doip: the ECU's logical address, hex"),
+        click.option(
+            "--activation-type",
+            default="00",
+            show_default=True,
+            help="doip: routing activation type, hex",
+        ),
+        click.option(
+            "--discover",
+            is_flag=True,
+            help="doip: vehicle identification first (broadcast without --host); "
+            "the ECU address defaults to the entity's",
+        ),
     ]
     for option in reversed(options):
         func = option(func)
@@ -110,40 +132,50 @@ def cli_ecu(
     bitrate: int | None,
     fd: bool,
     data_bitrate: int | None,
-    txid: str,
-    rxid: str,
+    txid: str | None,
+    rxid: str | None,
     extended: bool,
     remote_host: str | None = None,
     ssh_user: str | None = None,
     ssh_port: int | None = None,
     config_json: str | None = None,
+    doip: dict[str, Any] | None = None,
 ) -> Iterator[UdsEcu]:
-    """One ECU on its own bus, open for the block, stopped after it."""
+    """One ECU on its own bus or DoIP connection, open for the block, stopped after it."""
     from .app import ADVANCED_DEFAULTS, set_library_logging
 
     set_library_logging(False)
-    link: dict[str, Any] = {"channel": channel, "tx_id": txid, "rx_id": rxid}
-    link.update(extended_ids=extended, fd_mode=fd)
-    if bitrate:
-        link["bitrate"] = bitrate
-    if data_bitrate:
-        link["data_bitrate"] = data_bitrate
-    if interface not in INTERFACES:  # a python-can name, as 0.1.x passed it
-        config_json = json.dumps({"interface": interface, "channel": channel})
-        interface = "Other (python-can)"
-    if config_json:
-        link["config_json"] = config_json
-    if INTERFACES[interface] == Interface.ZELOS_SSH_SOCKETCAN:
-        if not remote_host:
-            raise click.UsageError("--interface zelos-ssh-socketcan needs --remote-host")
-        link.update(remote_host=remote_host, remote_channel=channel)
-        link.update({k: v for k, v in (("ssh_user", ssh_user), ("ssh_port", ssh_port)) if v})
+    if INTERFACES.get(interface) == Interface.DOIP:
+        link: dict[str, Any] = {"doip": doip or {}}
+    else:
+        for name, value in (("txid", txid), ("rxid", rxid)):
+            if not value:
+                raise click.UsageError(f"Missing option '--{name}'.")
+        link = {"channel": channel, "tx_id": txid, "rx_id": rxid}
+        link.update(extended_ids=extended, fd_mode=fd)
+        if bitrate:
+            link["bitrate"] = bitrate
+        if data_bitrate:
+            link["data_bitrate"] = data_bitrate
+        if interface not in INTERFACES:  # a python-can name, as 0.1.x passed it
+            config_json = json.dumps({"interface": interface, "channel": channel})
+            interface = "Other (python-can)"
+        if config_json:
+            link["config_json"] = config_json
+        if INTERFACES[interface] == Interface.ZELOS_SSH_SOCKETCAN:
+            if not remote_host:
+                raise click.UsageError("--interface zelos-ssh-socketcan needs --remote-host")
+            link.update(remote_host=remote_host, remote_channel=channel)
+            link.update({k: v for k, v in (("ssh_user", ssh_user), ("ssh_port", ssh_port)) if v})
     try:
         ecu = UdsEcu("cli", INTERFACES[interface], link, dict(ADVANCED_DEFAULTS))
     except ValueError as e:
         raise click.ClickException(str(e)) from e
-    bus = SharedBus(ecu.bus_link, ecu.endpoint)
-    bus.add(ecu)
+    if ecu.doip is not None:
+        bus = DoipLink(ecu)
+    else:
+        bus = SharedBus(ecu.bus_link, ecu.endpoint)
+        bus.add(ecu)
     start_all([ecu], [bus], None)
     try:
         deadline = time.monotonic() + CLI_OPEN_TIMEOUT
@@ -171,6 +203,8 @@ def command(func: Callable[..., dict[str, Any]]) -> Callable[..., None]:
         keys = ("interface", "channel", "bitrate", "fd", "data_bitrate", "txid", "rxid")
         extra = ("remote_host", "ssh_user", "ssh_port", "config_json")
         bus_args = {k: kwargs.pop(k) for k in (*keys, "extended", *extra)}
+        doip = ("host", "port", "tester_address", "ecu_address", "activation_type", "discover")
+        bus_args["doip"] = {k: kwargs.pop(k) for k in doip}
         with cli_ecu(**bus_args) as ecu:
             result = func(ecu, **kwargs)
         emit(result)

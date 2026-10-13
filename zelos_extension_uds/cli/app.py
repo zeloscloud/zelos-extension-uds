@@ -14,7 +14,7 @@ from zelos_sdk.hooks.logging import TraceLoggingHandler
 from .. import ACTION_PREFIX
 from .. import actions as uds_actions
 from .. import link as uds_link
-from ..client import SharedBus, UdsEcu
+from ..client import DoipLink, SharedBus, UdsEcu
 from ..constants import (
     DEFAULT_PREFIX,
     INTERFACES,
@@ -98,13 +98,14 @@ def _exit_on(error: str | None) -> None:
 
 
 def _ecu_name(ecu_config: dict[str, Any]) -> str:
-    """The configured name, else `demo`, or the sanitized remote or local CAN channel."""
+    """The configured name, else `demo`, `doip`, or the sanitized remote or local CAN
+    channel."""
     name = (ecu_config.get("name") or "").strip()
     if name:
         _exit_on(name_error(name, "ECU Name", RESERVED_ECU_NAMES))
         return name
-    if INTERFACES.get(ecu_config.get("interface")) == Interface.DEMO:
-        return "demo"
+    if INTERFACES.get(ecu_config.get("interface")) in (Interface.DEMO, Interface.DOIP):
+        return str(INTERFACES[ecu_config["interface"]])
     default = next(
         (ecu_config[k] for k in ("remote_channel", "channel") if ecu_config.get(k)), "ecu"
     )
@@ -150,9 +151,23 @@ def create_ecus(config: dict[str, Any], advanced: dict[str, Any]) -> list[UdsEcu
 
 
 def share_buses(ecus: list[UdsEcu]) -> list[SharedBus]:
-    """One bus per (interface, channel). ECUs on one bus must agree on its settings."""
+    """One bus per (interface, channel). ECUs on one bus must agree on its settings.
+
+    DoIP: a connection per ECU. Two on one entity need their own tester addresses: an
+    entity takes one connection per tester address.
+    """
     buses: dict[tuple, SharedBus] = {}
     for ecu in ecus:
+        if ecu.doip is not None:
+            key = ("doip", ecu.doip.host, ecu.doip.port, ecu.doip.tester)
+            if key in buses:
+                other = buses[key].ecus[0].name
+                _exit_on(
+                    f"ECUs '{other}' and '{ecu.name}' reach DoIP {ecu.doip.peer} with one tester "
+                    f"address (0x{ecu.doip.tester:04X}): give each its own"
+                )
+            buses[key] = DoipLink(ecu)
+            continue
         key = uds_link.bus_key(ecu.bus_link)
         shared = buses.get(key)
         if shared is None:
@@ -176,10 +191,11 @@ def share_buses(ecus: list[UdsEcu]) -> list[SharedBus]:
 
 
 def set_library_logging(debug_frames: bool) -> None:
-    """udsoncan and can-isotp log every request and frame: on with `debug_frames`. Off,
-    udsoncan is silent (the services log each NRC and timeout once) and can-isotp warns."""
+    """udsoncan, can-isotp and doipclient log every request and frame: on with
+    `debug_frames`. Off, udsoncan is silent (the services log each NRC and timeout once),
+    can-isotp warns, doipclient (which warns on each alive check it answers) errs."""
     for name, quiet in (("UdsClient", logging.CRITICAL), ("Connection", logging.CRITICAL),
-                        ("isotp", logging.WARNING)):  # fmt: skip
+                        ("isotp", logging.WARNING), ("doipclient", logging.ERROR)):  # fmt: skip
         logging.getLogger(name).setLevel(logging.DEBUG if debug_frames else quiet)
 
 

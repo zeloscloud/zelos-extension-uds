@@ -7,7 +7,7 @@ description = "Unified Diagnostic Services (UDS) extension for Zelos"
 author = "Zelos"
 repository = "https://github.com/zeloscloud/zelos-extension-uds"
 homepage = "https://github.com/zeloscloud/zelos-extension-uds"
-keywords = ["uds", "automotive", "diagnostics", "can", "iso-tp"]
+keywords = ["uds", "automotive", "diagnostics", "can", "iso-tp", "doip"]
 categories = ["Automotive", "Diagnostics"]
 
 # File references (relative paths in archive)

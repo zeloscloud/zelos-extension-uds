@@ -31,6 +31,19 @@
 | Memory | Addresses in 4 bytes (5 above 32 bits), sizes in the fewest of 1, 2, 4 bytes |
 | Flash | Holds the ECU for the whole sequence; `steps` lists each with its status. The check routine passes on a first result byte of 0x00 |
 
+## DoIP
+
+| Situation | What happens |
+|---|---|
+| Start | Discover on: vehicle identification on UDP 13400 (2 s). Then TCP connect (`tcp_timeout`) and routing activation (2 s for the answer). The ECU is `connected` once routing is active |
+| Refused | Routing activation refused, or more than one entity answered a broadcast: `error` with the reason. Activation codes 0x00, 0x02, 0x04, 0x06, 0x07 and the broadcast ambiguity are not retried; other failures (no answer, connection refused, other codes) are retried like a bus open |
+| Idle | Every 0.25 s while no request runs: the entity's alive check requests are answered, unasked messages dropped, a closed connection noticed |
+| Entity closes | `error` with `DoIP connection closed by the entity` (or `connection lost` with the socket error), reconnected with the bus's backoff. Within 5 s of an ECU reset it is the reset: logged at INFO, `connecting`, not counted as an error |
+| Requests | One at a time per ECU. Sent as one diagnostic message; the entity's acknowledgement (or NACK) awaited for `tcp_timeout`, then `p2_timeout`, `p2_star_timeout` and `request_timeout` as on CAN. A response after its request timed out is dropped before the next request |
+| Errors | NACKs are named: diagnostic message (0x8003) `DoIP diagnostic message refused: NACK 0x03 unknown target address`, generic header `DoIP header refused: NACK 0x01 unknown payload type` |
+| Stop | The TCP connection is shut down: a request in progress fails at once |
+| Protocol | ISO 13400-2:2012 headers (version 0x02). A VIN the entity reports as not configured (all 0x00 or 0xFF) is empty |
+
 ## Names and settings
 
 | Item | Handling |
