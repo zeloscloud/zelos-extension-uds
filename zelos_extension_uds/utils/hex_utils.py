@@ -70,16 +70,16 @@ def parse_hex_string(hex_str: str) -> bytes | dict[str, Any]:
 
         # Validate hex characters
         if not all(c in "0123456789abcdefABCDEF" for c in cleaned):
-            return {"error": f"Invalid hex characters in: {hex_str}"}
+            return {"error": f"'{hex_str}' is not hex bytes"}
 
         # Ensure even length for byte conversion
         if len(cleaned) % 2 != 0:
-            return {"error": f"Hex string must have even length, got: {len(cleaned)}"}
+            return {"error": f"'{hex_str}' has an odd number of hex digits"}
 
         return bytes.fromhex(cleaned)
 
-    except ValueError as e:
-        return {"error": f"Failed to parse hex string '{hex_str}': {e}"}
+    except ValueError:
+        return {"error": f"'{hex_str}' is not hex bytes"}
 
 
 def format_hex_string(data: bytes) -> str:
@@ -129,8 +129,8 @@ def validate_hex_id(hex_id: str | int) -> int | dict[str, Any]:
 
         return id_value
 
-    except ValueError as e:
-        return {"error": f"Invalid hex ID '{hex_id}': {e}"}
+    except ValueError:
+        return {"error": f"'{hex_id}' is not a hex number, e.g. 0x1234"}
 
 
 def format_hex_id(id_value: int, width: int = 4) -> str:
@@ -141,27 +141,6 @@ def format_hex_id(id_value: int, width: int = 4) -> str:
     :return: Formatted hex ID (e.g., "0x1234")
     """
     return f"0x{id_value:0{width}X}"
-
-
-def validate_data_length(
-    data: bytes, expected_length: int | None = None, max_length: int | None = None
-) -> dict[str, Any] | None:
-    """Validate data length constraints.
-
-    :param data: Data bytes to validate
-    :param expected_length: Expected exact length (optional)
-    :param max_length: Maximum allowed length (optional)
-    :return: Error dict if validation fails, None if valid
-    """
-    data_len = len(data)
-
-    if expected_length is not None and data_len != expected_length:
-        return {"error": f"Expected {expected_length} bytes, got {data_len}"}
-
-    if max_length is not None and data_len > max_length:
-        return {"error": f"Data exceeds maximum length of {max_length} bytes (got {data_len})"}
-
-    return None
 
 
 def parse_typed_payload(
@@ -209,14 +188,14 @@ def parse_typed_payload(
         num: int | float = (
             float(cleaned) if payload_type in ("float", "double") else int(cleaned, 0)
         )
-    except ValueError as e:
-        return {"error": f"Invalid {payload_type} value '{value}': {e}"}
+    except ValueError:
+        return {"error": f"Invalid {payload_type} value '{value}': not a number"}
 
     endian_prefix = "<" if endianness == ENDIANNESS_LITTLE else ">"
     try:
         return struct.pack(endian_prefix + fmt_char, num)
-    except struct.error as e:
-        return {"error": f"{payload_type} value out of range '{value}': {e}"}
+    except struct.error:
+        return {"error": f"{payload_type} value out of range '{value}'"}
 
 
 # Read-side: register-width -> list of (label, struct format char). Float is

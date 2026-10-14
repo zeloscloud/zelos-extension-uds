@@ -1,102 +1,246 @@
-"""App-based configuration mode for UDS diagnostics."""
+"""App-based configuration mode: every configured ECU, its actions and trace."""
 
+import contextlib
 import logging
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import zelos_sdk
 from zelos_sdk.extensions import load_config
+from zelos_sdk.hooks.logging import TraceLoggingHandler
 
-from ..utils import validate_hex_id
-from .utils import setup_shutdown_handler
+from .. import ACTION_PREFIX
+from .. import actions as uds_actions
+from .. import link as uds_link
+from ..client import SharedBus, UdsEcu
+from ..constants import (
+    DEFAULT_PREFIX,
+    INTERFACES,
+    LEGACY_INTERFACES,
+    LOG_SOURCE_NAME,
+    RESERVED_ECU_NAMES,
+    Interface,
+    demo_ecu,
+    name_error,
+    trace_layout,
+)
+from ..keys import load_key_file
+from .utils import run_until_stopped, start_all
 
 logger = logging.getLogger(__name__)
 
+#: `advanced` settings and their defaults. One value applies to every ECU.
+ADVANCED_DEFAULTS: dict[str, Any] = {
+    "prefix": DEFAULT_PREFIX,
+    "log_level": "INFO",
+    "request_timeout": 5.0,
+    "p2_timeout": 1.0,
+    "p2_star_timeout": 5.0,
+    "isotp_stmin": 0,
+    "isotp_blocksize": 0,  # one flow control per message: over a slow link each costs an RTT
+    "isotp_padding": None,  # unpadded
+    "tester_present_s": None,  # off
+    "debug_frames": False,
+}
 
-def run_app_mode(file: Path | None) -> None:
-    """Run UDS extension in app-based configuration mode.
+#: 0.1.x top-level keys -> `advanced` keys.
+LEGACY_ADVANCED = {
+    "log_level": "log_level",
+    "request_timeout": "request_timeout",
+    "p2_timeout": "p2_timeout",
+    "p2_star_timeout": "p2_star_timeout",
+    "isotp_stmin": "isotp_stmin",
+    "isotp_blocksize": "isotp_blocksize",
+    "isotp_tx_padding": "isotp_padding",
+}
 
+
+def migrate_legacy(config: dict[str, Any]) -> dict[str, Any]:
+    """A 0.1.x config (one flat ECU, top-level `interface`) as one ECU plus `advanced`."""
+    if config.get("ecus") or "interface" not in config:
+        return config
+    logger.warning("Single-ECU settings from 0.1.x read as one ECU; save the settings to update")
+    ecu = {k: config[k] for k in ("channel", "bitrate", "config_json") if k in config}
+    ecu["interface"] = LEGACY_INTERFACES.get(config["interface"], config["interface"])
+    ecu["tx_id"] = config.get("tx_id", "0x7E0")  # 0.1.x defaults
+    ecu["rx_id"] = config.get("rx_id", "0x7E8")
+    # 0.1.x took 29-bit ids from `extended_id`, or from an id over 0x7FF.
+    ecu["extended_ids"] = bool(config.get("extended_id")) or any(
+        _over_11_bits(ecu[k]) for k in ("tx_id", "rx_id")
+    )
+    advanced = {new: config[old] for old, new in LEGACY_ADVANCED.items() if old in config}
+    # A flat config has no user-set `advanced`: any there are schema defaults, so legacy wins.
+    return {"ecus": [ecu], "advanced": {**(config.get("advanced") or {}), **advanced}}
+
+
+def _over_11_bits(text: Any) -> bool:
+    try:
+        return int(str(text), 16) > 0x7FF
+    except ValueError:
+        return False  # refused with its reason when the ECU is created
+
+
+def resolve_advanced(config: dict[str, Any]) -> dict[str, Any]:
+    """Merge the `advanced` object over its defaults.
+
+    An absent `prefix` takes the default; a present-but-empty one clears it.
+    """
+    return {**ADVANCED_DEFAULTS, **(config.get("advanced") or {})}
+
+
+def _exit_on(error: str | None) -> None:
+    """Exit with a one-line reason when `error` is set."""
+    if error:
+        logger.error("%s", error)
+        sys.exit(1)
+
+
+def _ecu_name(ecu_config: dict[str, Any]) -> str:
+    """The configured name, else `demo`, or the sanitized remote or local CAN channel."""
+    name = (ecu_config.get("name") or "").strip()
+    if name:
+        _exit_on(name_error(name, "ECU Name", RESERVED_ECU_NAMES))
+        return name
+    if INTERFACES.get(ecu_config.get("interface")) == Interface.DEMO:
+        return "demo"
+    default = next(
+        (ecu_config[k] for k in ("remote_channel", "channel") if ecu_config.get(k)), "ecu"
+    )
+    return zelos_sdk.sanitize_name(str(default), kind="source")
+
+
+def _interface(name: str, ecu_config: dict[str, Any]) -> Interface:
+    value = ecu_config.get("interface")
+    if value not in INTERFACES:
+        choices = ", ".join(INTERFACES)
+        _exit_on(f"ECU '{name}': interface {value!r} is not supported. Choose one of: {choices}")
+    return INTERFACES[value]
+
+
+def create_ecus(config: dict[str, Any], advanced: dict[str, Any]) -> list[UdsEcu]:
+    """One UdsEcu per configured ECU. Names must be legal and unique."""
+    ecus_config = config.get("ecus") or []
+    if not ecus_config:
+        _exit_on("No ECUs configured. Add at least one ECU to the 'ecus' array.")
+    ecus: list[UdsEcu] = []
+    for ecu_config in ecus_config:
+        name = _ecu_name(ecu_config)
+        if any(e.name == name for e in ecus):
+            _exit_on(f"Duplicate ECU name '{name}'. Set Name on one of them.")
+        interface = _interface(name, ecu_config)
+        link = {k: v for k, v in ecu_config.items() if k not in ("name", "interface", "key_file")}
+        try:
+            ecu = UdsEcu(name, interface, link, advanced)
+        except ValueError as e:
+            _exit_on(f"ECU '{name}': {e}")
+        key_file = (ecu_config.get("key_file") or "").strip()
+        if not key_file and interface == Interface.DEMO:
+            key_file = demo_ecu()["key_file"]
+        if key_file:
+            try:
+                ecu.key_fn = load_key_file(key_file)
+            except ValueError as e:
+                _exit_on(f"ECU '{name}': {e}")
+            logger.info("ECU %s: seed/key from %s", name, key_file)
+        ecus.append(ecu)
+        logger.info("Created ECU %s (%s)", name, ecu.endpoint)
+    return ecus
+
+
+def share_buses(ecus: list[UdsEcu]) -> list[SharedBus]:
+    """One bus per (interface, channel). ECUs on one bus must agree on its settings."""
+    buses: dict[tuple, SharedBus] = {}
+    for ecu in ecus:
+        key = uds_link.bus_key(ecu.bus_link)
+        shared = buses.get(key)
+        if shared is None:
+            shared = buses[key] = SharedBus(ecu.bus_link, uds_link.bus_text(ecu.bus_link))
+        else:
+            first = shared.ecus[0]
+            ours, theirs = uds_link.bus_settings(ecu.bus_link), uds_link.bus_settings(first.link)
+            if ours != theirs:
+                _exit_on(
+                    f"ECUs '{first.name}' and '{ecu.name}' share {shared.name} with different "
+                    f"bus settings ({theirs} vs {ours}): make them match"
+                )
+            # One id, one owner: a response id another ECU also listens or sends on
+            # would hand its frames to the wrong ISO-TP stack.
+            ours = {(i, ecu.extended) for i in (ecu.tx_id, ecu.rx_id)}
+            for other in shared.ecus:
+                if ours & {(i, other.extended) for i in (other.tx_id, other.rx_id)}:
+                    _exit_on(f"ECUs '{other.name}' and '{ecu.name}' share a CAN id on one bus")
+        shared.add(ecu)
+    return list(buses.values())
+
+
+def set_library_logging(debug_frames: bool) -> None:
+    """udsoncan and can-isotp log every request and frame: on with `debug_frames`. Off,
+    udsoncan is silent (the services log each NRC and timeout once) and can-isotp warns."""
+    for name, quiet in (("UdsClient", logging.CRITICAL), ("Connection", logging.CRITICAL),
+                        ("isotp", logging.WARNING)):  # fmt: skip
+        logging.getLogger(name).setLevel(logging.DEBUG if debug_frames else quiet)
+
+
+def run_app_mode(demo: bool, file: Path | None) -> None:
+    """Run the UDS extension in app-based configuration mode.
+
+    :param demo: Add a demo ECU to the configured ones
     :param file: Optional output file for trace recording
     """
-    # Load and validate configuration
-    config = load_config()
+    config = migrate_legacy(load_config())
+    advanced = resolve_advanced(config)
+    prefix = str(advanced.get("prefix") or "").strip()
+    _exit_on(name_error(prefix, "Prefix"))
 
-    # Apply log level from config
-    log_level_str = config.get("log_level", "INFO")
-    try:
-        log_level = getattr(logging, log_level_str)
-    except AttributeError:
-        logger.warning(f"Invalid log level '{log_level_str}', using INFO")
-        log_level = logging.INFO
+    log_level = advanced["log_level"]
+    logging.getLogger().setLevel(getattr(logging, log_level, logging.INFO))
+    set_library_logging(bool(advanced["debug_frames"]))
+    logger.info("Log level set to: %s", log_level)
 
-    from zelos_extension_uds.logging import set_log_level
+    if demo:
+        logger.info("Demo mode enabled via --demo flag")
+        config["ecus"] = [*(config.get("ecus") or []), demo_ecu()]
 
-    set_log_level(log_level)
-    logger.info(f"Log level set to: {log_level_str}")
-
-    # Parse hex IDs from config (stored as strings)
-    tx_id_str = config.get("tx_id", "0x7E0")
-    rx_id_str = config.get("rx_id", "0x7E8")
-
-    tx_id = validate_hex_id(tx_id_str)
-    rx_id = validate_hex_id(rx_id_str)
-
-    if isinstance(tx_id, dict):
-        logger.error(f"Invalid TX ID: {tx_id['error']}")
-        sys.exit(1)
-
-    if isinstance(rx_id, dict):
-        logger.error(f"Invalid RX ID: {rx_id['error']}")
-        sys.exit(1)
-
-    # Update config with parsed IDs
-    config["tx_id"] = tx_id
-    config["rx_id"] = rx_id
-
-    # Determine output file if --file was specified
     output_file = None
     if file is not None:
-        if file == Path():
-            # Default filename using UTC timestamp
-            output_file = Path(f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_uds.trz")
-        else:
-            output_file = file
+        # --file without a value records to a UTC-stamped file.
+        if str(file) == ".":
+            file = Path(f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.trz")
+        output_file = file
+        logger.info("Recording trace to: %s", output_file)
 
-        logger.info(f"Recording trace to: {output_file}")
+    # Register actions BEFORE init: init advertises them to the agent. The
+    # address prefix comes from `init(name=ACTION_PREFIX)`.
+    uds_actions.register_actions(zelos_sdk.actions_registry)
 
-    # Create UDS client (lazy import to avoid action decorator issues)
-    from ..extension import UDSClient
+    # Log source first, so init below reuses it. Same layout rule as the data:
+    # a prefix means one source for every ECU, cleared each ECU owns its own.
+    log_source_name, _ = trace_layout(prefix, LOG_SOURCE_NAME)
+    global_source = zelos_sdk.init_global_source(log_source_name)
+    shared_source = global_source if prefix else None
+    if prefix:
+        logger.info("Trace prefix: %s", prefix)
+    else:
+        logger.info("Trace prefix cleared: one trace source per ECU")
 
-    logger.info("Creating UDS client")
-    client = UDSClient(config)
+    zelos_sdk.init(name=ACTION_PREFIX, log_level="info", actions=True)
 
-    # Register actions for Zelos App BEFORE initializing SDK
-    zelos_sdk.actions_registry.register(client, "uds_client")
+    handler = TraceLoggingHandler(global_source)
+    handler.setLevel(logging.INFO)
+    logging.getLogger().addHandler(handler)
 
-    # Initialize SDK with actions enabled
-    zelos_sdk.init(name="uds", log_level=log_level_str.lower(), actions=True)
-
-    # Setup graceful shutdown
-    setup_shutdown_handler(client)
-
-    # Run with optional trace recording
-    try:
+    with contextlib.ExitStack() as stack:
         if output_file:
-            with zelos_sdk.TraceWriter(str(output_file)):
-                logger.info("Starting UDS client with trace recording")
-                client.start()
-                client.run()
-        else:
-            logger.info("Starting UDS client")
-            client.start()
-            client.run()
+            stack.enter_context(zelos_sdk.TraceWriter(str(output_file)))
 
-    except KeyboardInterrupt:
-        logger.info("Interrupted by user")
-    except Exception as e:
-        logger.error(f"Error running UDS client: {e}", exc_info=True)
-        sys.exit(1)
-    finally:
-        client.stop()
-        logger.info("UDS client stopped")
+        ecus = create_ecus(config, advanced)
+        buses = share_buses(ecus)
+        for ecu in ecus:
+            ecu.trace_to(prefix, shared_source)
+            uds_actions.UDS_ECUS[ecu.name] = ecu
+        count = len(ecus)
+        logger.info("Starting UDS extension with %d ECU%s", count, "s" if count > 1 else "")
+        start_all(ecus, buses, advanced["tester_present_s"])
+        run_until_stopped(ecus, buses)

@@ -66,6 +66,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+!tests/conformance/MANIFEST
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -252,3 +253,7 @@ __marimo__/
 # Zelos
 .last_config
 config.json
+actions.json
+
+# Agent worktrees and local settings
+.claude/

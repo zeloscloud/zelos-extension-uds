@@ -1,650 +1,806 @@
 {
-  "$comment": "This schema defines the configuration UI in Zelos App. See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/#configuration for full widget reference.",
+  "$comment": "UDS extension configuration schema. See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/#configuration",
   "type": "object",
-  "title": "UDS Diagnostic Client Configuration",
-  "description": "Configure UDS diagnostic services over CAN with ISO-TP transport",
+  "title": "UDS Configuration",
+  "description": "Diagnose one or more ECUs over UDS (ISO 14229) on CAN with ISO-TP.",
+  "ui:options": {
+    "autoconfig": "UDS/auto_config"
+  },
   "properties": {
-    "interface": {
-      "type": "string",
-      "title": "CAN Interface",
-      "description": "CAN interface type. Pick 'demo' to run an embedded ECU simulator with no hardware required.",
-      "enum": [
-        "demo",
-        "socketcan",
-        "pcan",
-        "kvaser",
-        "vector",
-        "other"
-      ]
+    "ecus": {
+      "type": "array",
+      "title": "ECUs",
+      "description": "Add an ECU for each UDS server (one request/response CAN id pair), or use Auto-configure for a demo ECU.",
+      "items": {
+        "title": "ECU",
+        "type": "object",
+        "properties": {
+          "interface": {
+            "type": "string",
+            "title": "Interface",
+            "description": "How the extension reaches the ECU: SocketCAN (Linux), SocketCAN over SSH (a remote Linux device's SocketCAN over SSH, from any OS), PCAN, Kvaser, Vector, slcan, or Other (any python-can interface). Demo: a built-in simulated ECU with no hardware. ECUs on one interface and channel share one bus and must agree on its bitrate and CAN-FD settings. The bus opens when the extension starts.",
+            "enum": [
+              "SocketCAN",
+              "SocketCAN over SSH",
+              "PCAN",
+              "Kvaser",
+              "Vector",
+              "slcan (serial)",
+              "Other (python-can)",
+              "Demo"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Name the actions take as `ecu` and the trace shows. Letters, digits, space, '_' and '-' only. Defaults to the CAN channel, sanitized, or 'demo'.",
+            "pattern": "^[A-Za-z0-9 _-]*$",
+            "ui:placeholder": "bms"
+          },
+          "key_file": {
+            "type": "string",
+            "title": "Seed/Key File",
+            "description": "A Python file defining key(level: int, seed: bytes) -> bytes, run in the extension on the agent's host. Answers security access seeds when no key is given, and in Flash Firmware. Empty: keys are entered by hand.",
+            "ui:widget": "file-picker",
+            "ui:options": {
+              "accept": ".py"
+            }
+          }
+        },
+        "required": [
+          "interface"
+        ],
+        "dependencies": {
+          "interface": {
+            "oneOf": [
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "SocketCAN"
+                    ]
+                  },
+                  "channel": {
+                    "type": "string",
+                    "title": "Channel",
+                    "description": "SocketCAN interface name (can0, vcan0, slcan0, ...). Choose from the interfaces on the machine running the agent, or type a name.",
+                    "default": "can0",
+                    "ui:widget": "action-choices",
+                    "ui:options": {
+                      "action": "UDS/list_interfaces"
+                    }
+                  },
+                  "fd_mode": {
+                    "type": "boolean",
+                    "title": "CAN-FD Mode",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Additional python-can Bus() kwargs as JSON object"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Request CAN ID",
+                    "description": "CAN id the extension sends requests on (tester to ECU, physical addressing), hex, e.g. 0x7E0.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E0",
+                    "ui:placeholder": "0x7E0"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers on (ECU to tester), hex, e.g. 0x7E8.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E8",
+                    "ui:placeholder": "0x7E8"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "tx_id",
+                  "rx_id"
+                ],
+                "dependencies": {
+                  "fd_mode": {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              false
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              true
+                            ]
+                          },
+                          "data_bitrate": {
+                            "type": "integer",
+                            "title": "CAN-FD Data Bitrate (bps)",
+                            "description": "CAN-FD data phase bitrate",
+                            "enum": [
+                              500000,
+                              1000000,
+                              2000000,
+                              4000000,
+                              8000000
+                            ],
+                            "default": 2000000
+                          }
+                        },
+                        "required": [
+                          "data_bitrate"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "SocketCAN over SSH"
+                    ]
+                  },
+                  "remote_host": {
+                    "type": "string",
+                    "title": "Remote Host",
+                    "description": "Hostname or IP of the edge device running SocketCAN, reached over SSH (may be a ~/.ssh/config alias)"
+                  },
+                  "remote_channel": {
+                    "type": "string",
+                    "title": "Remote CAN Channel",
+                    "description": "SocketCAN interface name on the remote edge device (e.g. can0, vcan0)",
+                    "default": "can0"
+                  },
+                  "ssh_user": {
+                    "type": "string",
+                    "title": "SSH User",
+                    "description": "Username for the SSH connection (optional; falls back to your ssh config / current user)"
+                  },
+                  "ssh_port": {
+                    "type": "integer",
+                    "title": "SSH Port",
+                    "description": "TCP port for the SSH connection",
+                    "default": 22
+                  },
+                  "ssh_key_path": {
+                    "type": "string",
+                    "title": "SSH Key File",
+                    "description": "Path to a private key file for SSH authentication (optional)",
+                    "ui:widget": "file-picker"
+                  },
+                  "ssh_host_key_policy": {
+                    "type": "string",
+                    "title": "SSH Host Key Policy",
+                    "description": "How to treat the edge's SSH host key. 'auto' trusts whatever key the device presents and records nothing, so a reimaged device (which comes back with a new key) reconnects with no manual step. 'strict' uses your own ~/.ssh/known_hosts: an unknown or changed key is reported and the bus stops, rather than retrying.",
+                    "enum": [
+                      "auto",
+                      "strict"
+                    ],
+                    "default": "auto"
+                  },
+                  "ssh_extra_opts": {
+                    "type": "string",
+                    "title": "SSH Extra Options",
+                    "description": "Additional ssh command-line options, space-separated (e.g. -J bastion). Placed before the options above; ssh honours the first -o it sees, so these win over the settings above."
+                  },
+                  "ssh_hw_timestamps": {
+                    "type": "boolean",
+                    "title": "Hardware timestamps",
+                    "description": "Uses the adapter's hardware clock when the edge's candump supports -H; interfaces without one (vcan, some slcan) fall back to the extension's wall clock. Turn off to use the edge kernel's receive time.",
+                    "default": true,
+                    "ui:widget": "toggle"
+                  },
+                  "fd_mode": {
+                    "type": "boolean",
+                    "title": "CAN-FD Mode",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Request CAN ID",
+                    "description": "CAN id the extension sends requests on (tester to ECU, physical addressing), hex, e.g. 0x7E0.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E0",
+                    "ui:placeholder": "0x7E0"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers on (ECU to tester), hex, e.g. 0x7E8.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E8",
+                    "ui:placeholder": "0x7E8"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "interface",
+                  "remote_host",
+                  "tx_id",
+                  "rx_id"
+                ]
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "PCAN"
+                    ]
+                  },
+                  "channel": {
+                    "type": "string",
+                    "title": "Channel",
+                    "description": "CAN channel identifier",
+                    "default": "PCAN_USBBUS1"
+                  },
+                  "bitrate": {
+                    "type": "integer",
+                    "title": "Bitrate (bps)",
+                    "description": "CAN bus bitrate",
+                    "enum": [
+                      125000,
+                      250000,
+                      500000,
+                      1000000
+                    ],
+                    "default": 500000
+                  },
+                  "fd_mode": {
+                    "type": "boolean",
+                    "title": "CAN-FD Mode",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Additional python-can Bus() kwargs as JSON object"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Request CAN ID",
+                    "description": "CAN id the extension sends requests on (tester to ECU, physical addressing), hex, e.g. 0x7E0.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E0",
+                    "ui:placeholder": "0x7E0"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers on (ECU to tester), hex, e.g. 0x7E8.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E8",
+                    "ui:placeholder": "0x7E8"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "bitrate",
+                  "tx_id",
+                  "rx_id"
+                ],
+                "dependencies": {
+                  "fd_mode": {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              false
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              true
+                            ]
+                          },
+                          "data_bitrate": {
+                            "type": "integer",
+                            "title": "CAN-FD Data Bitrate (bps)",
+                            "description": "CAN-FD data phase bitrate",
+                            "enum": [
+                              500000,
+                              1000000,
+                              2000000,
+                              4000000,
+                              8000000
+                            ],
+                            "default": 2000000
+                          }
+                        },
+                        "required": [
+                          "data_bitrate"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "Kvaser"
+                    ]
+                  },
+                  "channel": {
+                    "type": "string",
+                    "title": "Channel",
+                    "description": "CAN channel identifier",
+                    "default": "0"
+                  },
+                  "bitrate": {
+                    "type": "integer",
+                    "title": "Bitrate (bps)",
+                    "description": "CAN bus bitrate",
+                    "enum": [
+                      125000,
+                      250000,
+                      500000,
+                      1000000
+                    ],
+                    "default": 500000
+                  },
+                  "fd_mode": {
+                    "type": "boolean",
+                    "title": "CAN-FD Mode",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Additional python-can Bus() kwargs as JSON object"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Request CAN ID",
+                    "description": "CAN id the extension sends requests on (tester to ECU, physical addressing), hex, e.g. 0x7E0.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E0",
+                    "ui:placeholder": "0x7E0"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers on (ECU to tester), hex, e.g. 0x7E8.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E8",
+                    "ui:placeholder": "0x7E8"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "bitrate",
+                  "tx_id",
+                  "rx_id"
+                ],
+                "dependencies": {
+                  "fd_mode": {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              false
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              true
+                            ]
+                          },
+                          "data_bitrate": {
+                            "type": "integer",
+                            "title": "CAN-FD Data Bitrate (bps)",
+                            "description": "CAN-FD data phase bitrate",
+                            "enum": [
+                              500000,
+                              1000000,
+                              2000000,
+                              4000000,
+                              8000000
+                            ],
+                            "default": 2000000
+                          }
+                        },
+                        "required": [
+                          "data_bitrate"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "Vector"
+                    ]
+                  },
+                  "channel": {
+                    "type": "string",
+                    "title": "Channel",
+                    "description": "CAN channel identifier",
+                    "default": "0"
+                  },
+                  "bitrate": {
+                    "type": "integer",
+                    "title": "Bitrate (bps)",
+                    "description": "CAN bus bitrate",
+                    "enum": [
+                      125000,
+                      250000,
+                      500000,
+                      1000000
+                    ],
+                    "default": 500000
+                  },
+                  "fd_mode": {
+                    "type": "boolean",
+                    "title": "CAN-FD Mode",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Additional python-can Bus() kwargs as JSON object"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Request CAN ID",
+                    "description": "CAN id the extension sends requests on (tester to ECU, physical addressing), hex, e.g. 0x7E0.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E0",
+                    "ui:placeholder": "0x7E0"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers on (ECU to tester), hex, e.g. 0x7E8.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E8",
+                    "ui:placeholder": "0x7E8"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "bitrate",
+                  "tx_id",
+                  "rx_id"
+                ],
+                "dependencies": {
+                  "fd_mode": {
+                    "oneOf": [
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              false
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "fd_mode": {
+                            "enum": [
+                              true
+                            ]
+                          },
+                          "data_bitrate": {
+                            "type": "integer",
+                            "title": "CAN-FD Data Bitrate (bps)",
+                            "description": "CAN-FD data phase bitrate",
+                            "enum": [
+                              500000,
+                              1000000,
+                              2000000,
+                              4000000,
+                              8000000
+                            ],
+                            "default": 2000000
+                          }
+                        },
+                        "required": [
+                          "data_bitrate"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "slcan (serial)"
+                    ]
+                  },
+                  "channel": {
+                    "type": "string",
+                    "title": "Serial Port",
+                    "description": "Serial device of the slcan adapter: /dev/ttyACM0 (Linux), /dev/tty.usbmodem... (macOS), COM3 (Windows).",
+                    "ui:placeholder": "/dev/ttyACM0"
+                  },
+                  "bitrate": {
+                    "type": "integer",
+                    "title": "Bitrate (bps)",
+                    "description": "CAN bus bitrate",
+                    "enum": [
+                      10000,
+                      20000,
+                      50000,
+                      83300,
+                      100000,
+                      125000,
+                      250000,
+                      500000,
+                      750000,
+                      1000000
+                    ],
+                    "default": 500000
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Additional python-can slcan Bus() kwargs as JSON object, e.g. {\"tty_baudrate\": 115200} for a UART adapter"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Request CAN ID",
+                    "description": "CAN id the extension sends requests on (tester to ECU, physical addressing), hex, e.g. 0x7E0.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E0",
+                    "ui:placeholder": "0x7E0"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers on (ECU to tester), hex, e.g. 0x7E8.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E8",
+                    "ui:placeholder": "0x7E8"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "bitrate",
+                  "tx_id",
+                  "rx_id"
+                ]
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "Other (python-can)"
+                    ]
+                  },
+                  "config_json": {
+                    "type": "string",
+                    "title": "Advanced Configuration (JSON)",
+                    "description": "Provide complete python-can Bus() kwargs as JSON. Must include 'interface' and 'channel' keys. Example: {\"interface\": \"ixxat\", \"channel\": 0, \"bitrate\": 500000}"
+                  },
+                  "tx_id": {
+                    "type": "string",
+                    "title": "Request CAN ID",
+                    "description": "CAN id the extension sends requests on (tester to ECU, physical addressing), hex, e.g. 0x7E0.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E0",
+                    "ui:placeholder": "0x7E0"
+                  },
+                  "rx_id": {
+                    "type": "string",
+                    "title": "Response CAN ID",
+                    "description": "CAN id the ECU answers on (ECU to tester), hex, e.g. 0x7E8.",
+                    "pattern": "^(0[xX])?[0-9A-Fa-f]{1,8}$",
+                    "default": "0x7E8",
+                    "ui:placeholder": "0x7E8"
+                  },
+                  "extended_ids": {
+                    "type": "boolean",
+                    "title": "Extended IDs",
+                    "description": "The two CAN ids above are 29-bit extended ids.",
+                    "default": false,
+                    "ui:widget": "toggle"
+                  }
+                },
+                "required": [
+                  "config_json",
+                  "tx_id",
+                  "rx_id"
+                ]
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "Demo"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "ui:order": [
+          "interface",
+          "name",
+          "channel",
+          "bitrate",
+          "fd_mode",
+          "tx_id",
+          "rx_id",
+          "extended_ids",
+          "*",
+          "key_file"
+        ]
+      }
+    },
+    "advanced": {
+      "type": "object",
+      "title": "Advanced",
+      "description": "Settings that apply to every ECU.",
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "title": "Prefix",
+          "description": "Leading trace source every ECU publishes under, so events read '<prefix>/<ecu>/tx'. Clear it to give each ECU its own trace source with events 'tx' and 'rx'.",
+          "default": "UDS",
+          "ui:placeholder": "UDS",
+          "ui:emptyValue": ""
+        },
+        "log_level": {
+          "type": "string",
+          "title": "Log Level",
+          "description": "Extension logging verbosity",
+          "enum": [
+            "DEBUG",
+            "INFO",
+            "WARNING",
+            "ERROR"
+          ],
+          "default": "INFO"
+        },
+        "request_timeout": {
+          "type": "number",
+          "title": "Request Timeout (seconds)",
+          "description": "Longest a request may take in total, response-pending answers included.",
+          "default": 5.0,
+          "minimum": 0.1,
+          "maximum": 600.0
+        },
+        "p2_timeout": {
+          "type": "number",
+          "title": "P2 Timeout (seconds)",
+          "description": "How long to wait for the ECU's first response.",
+          "default": 1.0,
+          "minimum": 0.01,
+          "maximum": 30.0
+        },
+        "p2_star_timeout": {
+          "type": "number",
+          "title": "P2* Timeout (seconds)",
+          "description": "How long to wait after each response-pending (NRC 0x78) answer.",
+          "default": 5.0,
+          "minimum": 0.1,
+          "maximum": 600.0
+        },
+        "isotp_stmin": {
+          "type": "integer",
+          "title": "ISO-TP STmin (ms)",
+          "description": "Minimum gap the ECU must leave between consecutive frames it sends us, in our flow control frames.",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 127
+        },
+        "isotp_blocksize": {
+          "type": "integer",
+          "title": "ISO-TP Block Size",
+          "description": "Consecutive frames the ECU may send before waiting for our next flow control; 0 for all, one flow control per message. Over a slow link (SSH) each flow control costs a round trip.",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 255
+        },
+        "isotp_padding": {
+          "type": "integer",
+          "title": "ISO-TP Padding Byte",
+          "description": "Pad every frame we send to 8 bytes with this byte (e.g. 204 = 0xCC); empty: unpadded. CAN FD frames are always padded to a valid length.",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "tester_present_s": {
+          "type": "number",
+          "title": "Tester Present Period (seconds)",
+          "description": "Send tester present (suppressed response) to every ECU at this period from the start, to hold non-default sessions; empty: off. The Periodic Tester Present action changes it per ECU.",
+          "minimum": 0.5,
+          "maximum": 10.0
+        },
+        "debug_frames": {
+          "type": "boolean",
+          "title": "Debug Frames",
+          "description": "Log every request, response and ISO-TP frame at DEBUG level.",
+          "default": false,
+          "ui:widget": "toggle"
+        }
+      },
+      "additionalProperties": false,
+      "default": {},
+      "ui:options": {
+        "collapsed": true
+      }
     }
   },
   "required": [
-    "interface"
-  ],
-  "dependencies": {
-    "interface": {
-      "oneOf": [
-        {
-          "properties": {
-            "interface": {
-              "enum": [
-                "demo"
-              ]
-            },
-            "tx_id": {
-              "type": "string",
-              "title": "TX CAN ID (hex, optional)",
-              "description": "CAN ID for outgoing requests (tester->ECU)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "default": "0x7E0",
-              "ui:placeholder": "0x7E0"
-            },
-            "rx_id": {
-              "type": "string",
-              "title": "RX CAN ID (hex, optional)",
-              "description": "CAN ID for incoming responses (ECU->tester)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "default": "0x7E8",
-              "ui:placeholder": "0x7E8"
-            },
-            "log_level": {
-              "type": "string",
-              "title": "Log Level",
-              "description": "Set the logging verbosity level",
-              "enum": [
-                "DEBUG",
-                "INFO",
-                "WARNING",
-                "ERROR"
-              ],
-              "default": "INFO"
-            }
-          }
-        },
-        {
-          "properties": {
-            "interface": {
-              "enum": [
-                "socketcan"
-              ]
-            },
-            "channel": {
-              "type": "string",
-              "title": "Channel",
-              "description": "CAN channel identifier",
-              "default": "can0"
-            },
-            "tx_id": {
-              "type": "string",
-              "title": "TX CAN ID (hex, optional)",
-              "description": "CAN ID for outgoing requests (tester->ECU)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "ui:placeholder": "0x7E0",
-              "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
-            },
-            "rx_id": {
-              "type": "string",
-              "title": "RX CAN ID (hex, optional)",
-              "description": "CAN ID for incoming responses (ECU->tester)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "ui:placeholder": "0x7E8",
-              "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
-            },
-            "log_level": {
-              "type": "string",
-              "title": "Log Level",
-              "description": "Set the logging verbosity level",
-              "enum": [
-                "DEBUG",
-                "INFO",
-                "WARNING",
-                "ERROR"
-              ],
-              "default": "INFO"
-            },
-            "show_advanced": {
-              "type": "boolean",
-              "title": "Show Advanced Settings",
-              "description": "Show advanced timeout and protocol settings",
-              "default": false,
-              "ui:widget": "toggle"
-            }
-          },
-          "required": [
-            "channel"
-          ],
-          "dependencies": {
-            "show_advanced": {
-              "oneOf": [
-                {
-                  "properties": {
-                    "show_advanced": {
-                      "enum": [
-                        false
-                      ]
-                    }
-                  }
-                },
-                {
-                  "properties": {
-                    "show_advanced": {
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "request_timeout": {
-                      "type": "number",
-                      "title": "Request Timeout (seconds)",
-                      "description": "Maximum time to wait for UDS response",
-                      "minimum": 0.1,
-                      "maximum": 30.0,
-                      "default": 5.0,
-                      "ui:help": "Total timeout for complete request/response cycle"
-                    },
-                    "p2_timeout": {
-                      "type": "number",
-                      "title": "P2 Timeout (seconds)",
-                      "description": "Default P2 timeout per ISO 14229",
-                      "minimum": 0.05,
-                      "maximum": 5.0,
-                      "default": 1.0,
-                      "ui:help": "Time for ECU to start sending response"
-                    },
-                    "p2_star_timeout": {
-                      "type": "number",
-                      "title": "P2* Enhanced Timeout (seconds)",
-                      "description": "Enhanced P2 timeout for long operations",
-                      "minimum": 1.0,
-                      "maximum": 60.0,
-                      "default": 5.0,
-                      "ui:help": "Extended timeout for flash/programming operations"
-                    },
-                    "config_json": {
-                      "type": "string",
-                      "title": "Advanced Configuration (JSON)",
-                      "description": "Additional python-can Bus() kwargs as JSON object",
-                      "ui:help": "Example: {\"fd\": true, \"data_bitrate\": 2000000}"
-                    }
-                  }
-                }
-              ]
-            }
-          }
-        },
-        {
-          "properties": {
-            "interface": {
-              "enum": [
-                "pcan"
-              ]
-            },
-            "channel": {
-              "type": "string",
-              "title": "Channel",
-              "description": "CAN channel identifier",
-              "default": "PCAN_USBBUS1"
-            },
-            "bitrate": {
-              "type": "integer",
-              "title": "Bitrate (bps)",
-              "description": "CAN bus bitrate",
-              "enum": [
-                125000,
-                250000,
-                500000,
-                1000000
-              ],
-              "default": 500000
-            },
-            "tx_id": {
-              "type": "string",
-              "title": "TX CAN ID (hex, optional)",
-              "description": "CAN ID for outgoing requests (tester->ECU)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "ui:placeholder": "0x7E0",
-              "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
-            },
-            "rx_id": {
-              "type": "string",
-              "title": "RX CAN ID (hex, optional)",
-              "description": "CAN ID for incoming responses (ECU->tester)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "ui:placeholder": "0x7E8",
-              "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
-            },
-            "log_level": {
-              "type": "string",
-              "title": "Log Level",
-              "description": "Set the logging verbosity level",
-              "enum": [
-                "DEBUG",
-                "INFO",
-                "WARNING",
-                "ERROR"
-              ],
-              "default": "INFO"
-            },
-            "show_advanced": {
-              "type": "boolean",
-              "title": "Show Advanced Settings",
-              "description": "Show advanced timeout and protocol settings",
-              "default": false,
-              "ui:widget": "toggle"
-            }
-          },
-          "required": [
-            "channel",
-            "bitrate"
-          ],
-          "dependencies": {
-            "show_advanced": {
-              "oneOf": [
-                {
-                  "properties": {
-                    "show_advanced": {
-                      "enum": [
-                        false
-                      ]
-                    }
-                  }
-                },
-                {
-                  "properties": {
-                    "show_advanced": {
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "request_timeout": {
-                      "type": "number",
-                      "title": "Request Timeout (seconds)",
-                      "description": "Maximum time to wait for UDS response",
-                      "minimum": 0.1,
-                      "maximum": 30.0,
-                      "default": 5.0,
-                      "ui:help": "Total timeout for complete request/response cycle"
-                    },
-                    "p2_timeout": {
-                      "type": "number",
-                      "title": "P2 Timeout (seconds)",
-                      "description": "Default P2 timeout per ISO 14229",
-                      "minimum": 0.05,
-                      "maximum": 5.0,
-                      "default": 1.0,
-                      "ui:help": "Time for ECU to start sending response"
-                    },
-                    "p2_star_timeout": {
-                      "type": "number",
-                      "title": "P2* Enhanced Timeout (seconds)",
-                      "description": "Enhanced P2 timeout for long operations",
-                      "minimum": 1.0,
-                      "maximum": 60.0,
-                      "default": 5.0,
-                      "ui:help": "Extended timeout for flash/programming operations"
-                    },
-                    "config_json": {
-                      "type": "string",
-                      "title": "Advanced Configuration (JSON)",
-                      "description": "Additional python-can Bus() kwargs as JSON object",
-                      "ui:help": "Example: {\"fd\": true, \"data_bitrate\": 2000000}"
-                    }
-                  }
-                }
-              ]
-            }
-          }
-        },
-        {
-          "properties": {
-            "interface": {
-              "enum": [
-                "kvaser"
-              ]
-            },
-            "channel": {
-              "type": "string",
-              "title": "Channel",
-              "description": "CAN channel identifier",
-              "default": "0"
-            },
-            "bitrate": {
-              "type": "integer",
-              "title": "Bitrate (bps)",
-              "description": "CAN bus bitrate",
-              "enum": [
-                125000,
-                250000,
-                500000,
-                1000000
-              ],
-              "default": 500000
-            },
-            "tx_id": {
-              "type": "string",
-              "title": "TX CAN ID (hex, optional)",
-              "description": "CAN ID for outgoing requests (tester->ECU)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "ui:placeholder": "0x7E0",
-              "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
-            },
-            "rx_id": {
-              "type": "string",
-              "title": "RX CAN ID (hex, optional)",
-              "description": "CAN ID for incoming responses (ECU->tester)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "ui:placeholder": "0x7E8",
-              "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
-            },
-            "log_level": {
-              "type": "string",
-              "title": "Log Level",
-              "description": "Set the logging verbosity level",
-              "enum": [
-                "DEBUG",
-                "INFO",
-                "WARNING",
-                "ERROR"
-              ],
-              "default": "INFO"
-            },
-            "show_advanced": {
-              "type": "boolean",
-              "title": "Show Advanced Settings",
-              "description": "Show advanced timeout and protocol settings",
-              "default": false,
-              "ui:widget": "toggle"
-            }
-          },
-          "required": [
-            "channel",
-            "bitrate"
-          ],
-          "dependencies": {
-            "show_advanced": {
-              "oneOf": [
-                {
-                  "properties": {
-                    "show_advanced": {
-                      "enum": [
-                        false
-                      ]
-                    }
-                  }
-                },
-                {
-                  "properties": {
-                    "show_advanced": {
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "request_timeout": {
-                      "type": "number",
-                      "title": "Request Timeout (seconds)",
-                      "description": "Maximum time to wait for UDS response",
-                      "minimum": 0.1,
-                      "maximum": 30.0,
-                      "default": 5.0,
-                      "ui:help": "Total timeout for complete request/response cycle"
-                    },
-                    "p2_timeout": {
-                      "type": "number",
-                      "title": "P2 Timeout (seconds)",
-                      "description": "Default P2 timeout per ISO 14229",
-                      "minimum": 0.05,
-                      "maximum": 5.0,
-                      "default": 1.0,
-                      "ui:help": "Time for ECU to start sending response"
-                    },
-                    "p2_star_timeout": {
-                      "type": "number",
-                      "title": "P2* Enhanced Timeout (seconds)",
-                      "description": "Enhanced P2 timeout for long operations",
-                      "minimum": 1.0,
-                      "maximum": 60.0,
-                      "default": 5.0,
-                      "ui:help": "Extended timeout for flash/programming operations"
-                    },
-                    "config_json": {
-                      "type": "string",
-                      "title": "Advanced Configuration (JSON)",
-                      "description": "Additional python-can Bus() kwargs as JSON object",
-                      "ui:help": "Example: {\"fd\": true, \"data_bitrate\": 2000000}"
-                    }
-                  }
-                }
-              ]
-            }
-          }
-        },
-        {
-          "properties": {
-            "interface": {
-              "enum": [
-                "vector"
-              ]
-            },
-            "channel": {
-              "type": "string",
-              "title": "Channel",
-              "description": "CAN channel identifier",
-              "default": "0"
-            },
-            "bitrate": {
-              "type": "integer",
-              "title": "Bitrate (bps)",
-              "description": "CAN bus bitrate",
-              "enum": [
-                125000,
-                250000,
-                500000,
-                1000000
-              ],
-              "default": 500000
-            },
-            "tx_id": {
-              "type": "string",
-              "title": "TX CAN ID (hex, optional)",
-              "description": "CAN ID for outgoing requests (tester->ECU)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "ui:placeholder": "0x7E0",
-              "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
-            },
-            "rx_id": {
-              "type": "string",
-              "title": "RX CAN ID (hex, optional)",
-              "description": "CAN ID for incoming responses (ECU->tester)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "ui:placeholder": "0x7E8",
-              "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
-            },
-            "log_level": {
-              "type": "string",
-              "title": "Log Level",
-              "description": "Set the logging verbosity level",
-              "enum": [
-                "DEBUG",
-                "INFO",
-                "WARNING",
-                "ERROR"
-              ],
-              "default": "INFO"
-            },
-            "show_advanced": {
-              "type": "boolean",
-              "title": "Show Advanced Settings",
-              "description": "Show advanced timeout and protocol settings",
-              "default": false,
-              "ui:widget": "toggle"
-            }
-          },
-          "required": [
-            "channel",
-            "bitrate"
-          ],
-          "dependencies": {
-            "show_advanced": {
-              "oneOf": [
-                {
-                  "properties": {
-                    "show_advanced": {
-                      "enum": [
-                        false
-                      ]
-                    }
-                  }
-                },
-                {
-                  "properties": {
-                    "show_advanced": {
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "request_timeout": {
-                      "type": "number",
-                      "title": "Request Timeout (seconds)",
-                      "description": "Maximum time to wait for UDS response",
-                      "minimum": 0.1,
-                      "maximum": 30.0,
-                      "default": 5.0,
-                      "ui:help": "Total timeout for complete request/response cycle"
-                    },
-                    "p2_timeout": {
-                      "type": "number",
-                      "title": "P2 Timeout (seconds)",
-                      "description": "Default P2 timeout per ISO 14229",
-                      "minimum": 0.05,
-                      "maximum": 5.0,
-                      "default": 1.0,
-                      "ui:help": "Time for ECU to start sending response"
-                    },
-                    "p2_star_timeout": {
-                      "type": "number",
-                      "title": "P2* Enhanced Timeout (seconds)",
-                      "description": "Enhanced P2 timeout for long operations",
-                      "minimum": 1.0,
-                      "maximum": 60.0,
-                      "default": 5.0,
-                      "ui:help": "Extended timeout for flash/programming operations"
-                    },
-                    "config_json": {
-                      "type": "string",
-                      "title": "Advanced Configuration (JSON)",
-                      "description": "Additional python-can Bus() kwargs as JSON object",
-                      "ui:help": "Example: {\"fd\": true, \"data_bitrate\": 2000000}"
-                    }
-                  }
-                }
-              ]
-            }
-          }
-        },
-        {
-          "properties": {
-            "interface": {
-              "enum": [
-                "other"
-              ]
-            },
-            "tx_id": {
-              "type": "string",
-              "title": "TX CAN ID (hex, optional)",
-              "description": "CAN ID for outgoing requests (tester->ECU)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "ui:placeholder": "0x7E0",
-              "ui:help": "Standard: 0x7DF (broadcast), 0x7E0-0x7E7 (physical)"
-            },
-            "rx_id": {
-              "type": "string",
-              "title": "RX CAN ID (hex, optional)",
-              "description": "CAN ID for incoming responses (ECU->tester)",
-              "pattern": "^0x[0-9A-Fa-f]{1,3}$",
-              "ui:placeholder": "0x7E8",
-              "ui:help": "Standard: 0x7E8-0x7EF (ECU responses)"
-            },
-            "config_json": {
-              "type": "string",
-              "title": "CAN Configuration (JSON)",
-              "description": "Complete python-can Bus() kwargs as JSON. Must include 'interface' and 'channel' keys.",
-              "ui:help": "Example: {\"interface\": \"slcan\", \"channel\": \"/dev/ttyUSB0\", \"bitrate\": 500000}"
-            },
-            "log_level": {
-              "type": "string",
-              "title": "Log Level",
-              "description": "Set the logging verbosity level",
-              "enum": [
-                "DEBUG",
-                "INFO",
-                "WARNING",
-                "ERROR"
-              ],
-              "default": "INFO"
-            },
-            "show_advanced": {
-              "type": "boolean",
-              "title": "Show Advanced Settings",
-              "description": "Show advanced timeout and protocol settings",
-              "default": false,
-              "ui:widget": "toggle"
-            }
-          },
-          "required": [
-            "config_json"
-          ],
-          "dependencies": {
-            "show_advanced": {
-              "oneOf": [
-                {
-                  "properties": {
-                    "show_advanced": {
-                      "enum": [
-                        false
-                      ]
-                    }
-                  }
-                },
-                {
-                  "properties": {
-                    "show_advanced": {
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "request_timeout": {
-                      "type": "number",
-                      "title": "Request Timeout (seconds)",
-                      "description": "Maximum time to wait for UDS response",
-                      "minimum": 0.1,
-                      "maximum": 30.0,
-                      "default": 5.0,
-                      "ui:help": "Total timeout for complete request/response cycle"
-                    },
-                    "p2_timeout": {
-                      "type": "number",
-                      "title": "P2 Timeout (seconds)",
-                      "description": "Default P2 timeout per ISO 14229",
-                      "minimum": 0.05,
-                      "maximum": 5.0,
-                      "default": 1.0,
-                      "ui:help": "Time for ECU to start sending response"
-                    },
-                    "p2_star_timeout": {
-                      "type": "number",
-                      "title": "P2* Enhanced Timeout (seconds)",
-                      "description": "Enhanced P2 timeout for long operations",
-                      "minimum": 1.0,
-                      "maximum": 60.0,
-                      "default": 5.0,
-                      "ui:help": "Extended timeout for flash/programming operations"
-                    }
-                  }
-                }
-              ]
-            }
-          }
-        }
-      ]
-    }
-  }
+    "ecus"
+  ]
 }
