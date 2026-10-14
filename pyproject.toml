@@ -21,7 +21,7 @@ dependencies = [
     "zelos-sdk>=0.0.12a3",
     "rich-click>=1.8.0",
     # CAN bus runtime (`zelos_can.bus`), python-can included through the extra.
-    "zelos-can[python-can]>=0.0.11a5",
+    "zelos-can[python-can]>=0.0.11a10",
     "can-isotp>=2.0.0",
     "udsoncan>=1.21.0",
 ]
