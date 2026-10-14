@@ -6,7 +6,7 @@ authors = [{ name = "zeloscloud", email = "info@zeloscloud.io" }]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-keywords = ["zelos", "extension", "uds", "iso-tp", "diagnostics", "automotive"]
+keywords = ["zelos", "extension", "uds", "iso-tp", "doip", "diagnostics", "automotive"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -24,6 +24,8 @@ dependencies = [
     "zelos-can[python-can]>=0.0.11a5",
     "can-isotp>=2.0.0",
     "udsoncan>=1.21.0",
+    # DoIP transport; a minor pin: doip.py replaces its socket setup and TCP read.
+    "doipclient>=1.2.2,<1.3",
 ]
 
 [project.urls]

@@ -1,9 +1,11 @@
-"""ECU lifecycle: one persistent bus per (interface, channel), one ISO-TP stack per ECU.
+"""ECU lifecycle: one persistent bus per (interface, channel), one ISO-TP stack per ECU;
+or one DoIP connection per ECU.
 
 `SharedBus` owns a bus, its `can.Notifier` and one worker thread that opens
 the bus, attaches every ECU's ISO-TP stack, watches for failure and reopens
-with backoff. `UdsEcu` serializes requests on its address pair: udsoncan is
-not safe for concurrent use of one ISO-TP connection.
+with backoff. `DoipLink` is the same worker for one ECU's DoIP connection.
+`UdsEcu` serializes requests on its address pair: udsoncan is not safe for
+concurrent use of one connection.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from udsoncan.client import Client
 from udsoncan.connections import PythonIsoTpConnection
 from udsoncan.exceptions import NegativeResponseException, TimeoutException
 
+from zelos_extension_uds import doip
 from zelos_extension_uds import link as uds_link
 from zelos_extension_uds.constants import INTERFACES, Interface, trace_layout
 from zelos_extension_uds.trace import Trace, service_name
@@ -52,6 +55,10 @@ HEALTH_TICK = 0.25
 NOTIFIER_TIMEOUT = 0.1
 
 SID_TESTER_PRESENT = 0x3E
+SID_ECU_RESET = 0x11
+
+#: An entity closing the connection this soon after an ECU reset is the reset, not a fault.
+RESET_CLOSE_S = 5.0
 
 #: Longest a request waits for its ECU's lock: shorter than an action's 30 s timeout, so a
 #: request queued behind a long one (a flash) fails instead of being sent after its caller
@@ -225,12 +232,12 @@ class SharedBus:
             try:
                 self._open()
             except Exception as e:
-                permanent = uds_link.permanent(e, self.link)
-                self.fail(f"cannot open {uds_link.bus_text(self.link)}: {_describe(e)}")
+                reason, permanent = self._open_error(e)
+                self.fail(reason)
             while not self._stop.is_set() and not self._failed.wait(HEALTH_TICK):
-                dead = next((e for e in self.ecus if not e.stack_alive()), None)
-                if dead is not None:
-                    self.fail(f"ISO-TP stack of {dead.name} stopped (CAN send failed?)")
+                reason = self._health()
+                if reason:
+                    self.fail(reason)
             reason = "" if self._stop.is_set() else self._reason
             self._close(reason)
             if self._stop.is_set():
@@ -244,6 +251,16 @@ class SharedBus:
             self._stop.wait(backoff)
             backoff = min(backoff * 2, RECONNECT_MAX)
             self.reopens += 1
+
+    def _open_error(self, e: Exception) -> tuple[str, bool]:
+        """Why opening failed, and whether no retry fixes it."""
+        reason = f"cannot open {uds_link.bus_text(self.link)}: {_describe(e)}"
+        return reason, uds_link.permanent(e, self.link)
+
+    def _health(self) -> str | None:
+        """Why the open bus is unusable, or None; every HEALTH_TICK."""
+        dead = next((e for e in self.ecus if not e.stack_alive()), None)
+        return None if dead is None else f"ISO-TP stack of {dead.name} stopped (CAN send failed?)"
 
     def _open(self) -> None:
         self.bus = uds_link.open_bus(self.link, self.name)
@@ -269,6 +286,63 @@ class SharedBus:
                 logger.debug("[%s] bus shutdown: %s", self.name, e)
 
 
+class DoipLink(SharedBus):
+    """One ECU's DoIP connection, run like a bus: identify the entity (Discover),
+    connect, activate routing; while idle, answer alive checks and watch for the entity
+    closing; reconnect with the bus's backoff."""
+
+    def __init__(self, ecu: UdsEcu) -> None:
+        super().__init__({}, ecu.name)  # its endpoint is known only once identified
+        self.add(ecu)
+        self.ecu = ecu
+        self.client: doip.Client | None = None
+        self.connection: doip.Connection | None = None
+
+    def _open(self) -> None:
+        cfg = self.ecu.doip
+        if cfg.discover:
+            self.ecu.vehicle = None  # an answer from an earlier connection is stale
+            self.ecu.vehicle = doip.identify(cfg.host)
+            logger.info("[%s] DoIP entity %s", self.ecu.name, self.ecu.vehicle.as_dict())
+        self.client, self.ecu.ecu_address = doip.connect(cfg, self.ecu.vehicle)
+        self.connection = doip.Connection(
+            self.client, cfg.tester, self.ecu.ecu_address, cfg.timeout, self.ecu._sent, self.fail
+        )
+        self.ecu._open_client(self.connection)
+
+    def _open_error(self, e: Exception) -> tuple[str, bool]:
+        text = str(e) if isinstance(e, doip.Refused | doip.DoipError) else _describe(e)
+        permanent = isinstance(e, doip.Refused) and e.permanent
+        return f"cannot connect to DoIP {self.ecu.doip.peer}: {text}", permanent
+
+    def _health(self) -> str | None:
+        connection = self.connection
+        if connection is None or not self.ecu.lock.acquire(blocking=False):
+            return None  # a request in progress sees a closed connection itself
+        try:
+            connection.empty_rxqueue()
+        except doip.Lost as e:
+            return str(e)
+        except Exception as e:
+            return f"DoIP connection lost: {_describe(e)}"
+        finally:
+            self.ecu.lock.release()
+        return None
+
+    def _close(self, reason: str) -> None:
+        """Explicit order: udsoncan client, DoIP connection."""
+        if reason == doip.CLOSED and time.monotonic() - self.ecu.reset_at < RESET_CLOSE_S:
+            logger.info("[%s] the entity closed the connection after the ECU reset", self.name)
+            reason = ""
+        self.ecu._detach(reason)
+        if not reason and not self._stop.is_set():
+            self.ecu.state = State.CONNECTING
+        self.connection = None
+        client, self.client = self.client, None
+        if client is not None:
+            client.close()
+
+
 class UdsEcu:
     """One ECU: an address pair on a shared bus, its udsoncan client and periodic TP."""
 
@@ -280,7 +354,14 @@ class UdsEcu:
         #: `key(level, seed) -> key` from the ECU's key file, or None.
         self.key_fn: Callable[[int, bytes], bytes] | None = None
         link = dict(link)
-        if interface == Interface.DEMO:
+        #: DoIP: the settings, the identified entity (Discover) and the ECU's logical address.
+        self.doip: doip.Config | None = None
+        self.vehicle: doip.Vehicle | None = None
+        self.ecu_address: int | None = None
+        if interface == Interface.DOIP:
+            self.doip = doip.config(link)  # ValueError
+            self.ecu_address = self.doip.ecu
+        elif interface == Interface.DEMO:
             from zelos_extension_uds.demo.ecu import REQUEST_ID, RESPONSE_ID
 
             link.setdefault("tx_id", hex(REQUEST_ID))
@@ -289,8 +370,9 @@ class UdsEcu:
         else:
             link["interface"] = str(interface)
         self.link = link
-        self.bus_link = uds_link.bus_link(link)
-        self.tx_id, self.rx_id, self.extended = uds_link.ids(link)  # ValueError
+        if self.doip is None:
+            self.bus_link = uds_link.bus_link(link)
+            self.tx_id, self.rx_id, self.extended = uds_link.ids(link)  # ValueError
         self.fd = bool(link.get("fd_mode"))
         self.advanced = advanced
         self.shared: SharedBus | None = None
@@ -313,9 +395,14 @@ class UdsEcu:
         self._stack: isotp.NotifierBasedCanStack | None = None
         self._client: Client | None = None
         self.demo = None
+        self.reset_at = -math.inf  # last ECUReset sent and not refused
 
     @property
     def endpoint(self) -> str:
+        if self.doip is not None:
+            host = self.doip.host or (self.vehicle.ip if self.vehicle else "broadcast")
+            ecu = "discover" if self.ecu_address is None else f"0x{self.ecu_address:04X}"
+            return f"doip://{host}:{self.doip.port} 0x{self.doip.tester:04X}/{ecu}"
         ids = f"{uds_link.id_text(self.tx_id, self.extended)}/"
         ids += uds_link.id_text(self.rx_id, self.extended)
         if self.interface == Interface.DEMO:
@@ -358,9 +445,14 @@ class UdsEcu:
             params=uds_link.isotp_params(self.advanced, self.fd),
         )
         connection = _Connection(stack, self._sent, float(self.advanced["request_timeout"]))
+        self._open_client(connection)
+        self._stack = stack
+
+    def _open_client(self, connection: Any) -> None:
+        """udsoncan's client on `connection`: the ECU is connected."""
         client = Client(connection, config=client_config(self.advanced))
         client.open()
-        self._stack, self._client = stack, client
+        self._client = client
         self.state, self.last_error = State.CONNECTED, ""
         logger.info("[%s] connected (%s)", self.name, self.endpoint)
 
@@ -445,6 +537,8 @@ class UdsEcu:
                 raise
             finally:
                 self._sending = None
+            if sid == SID_ECU_RESET:
+                self.reset_at = time.monotonic()
             elapsed = time.monotonic() - start
             if response is not None:
                 self.counts["responses"] += 1
@@ -508,16 +602,27 @@ class UdsEcu:
     # ─── Status ────────────────────────────────────────────────────────────
 
     def status(self) -> dict[str, Any]:
+        if self.doip is not None:
+            ids = {
+                "tester_address": f"0x{self.doip.tester:04X}",
+                "ecu_address": "" if self.ecu_address is None else f"0x{self.ecu_address:04X}",
+                "activation_type": f"0x{self.doip.activation:02X}",
+                "vehicle": self.vehicle.as_dict() if self.vehicle else None,
+            }
+        else:
+            ids = {
+                "tx_id": uds_link.id_text(self.tx_id, self.extended),
+                "rx_id": uds_link.id_text(self.rx_id, self.extended),
+                "extended_ids": self.extended,
+                "fd_mode": self.fd,
+            }
         return {
             "name": self.name,
             "state": str(self.state),
             "last_error": self.last_error,
             "interface": self.label,
             "endpoint": self.endpoint,
-            "tx_id": uds_link.id_text(self.tx_id, self.extended),
-            "rx_id": uds_link.id_text(self.rx_id, self.extended),
-            "extended_ids": self.extended,
-            "fd_mode": self.fd,
+            **ids,
             "tester_present_active": self.tp_period is not None,
             "tester_present_interval": self.tp_period or 0,
             "reopens": self.shared.reopens if self.shared else 0,
