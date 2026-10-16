@@ -12,19 +12,15 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 MANIFEST = HERE / "MANIFEST"
-#: Repository-relative, kept as such: zelos_testing.dbc finds dbc/ from its own path.
+#: Repository-relative, as in zelos-examples.
 FILES = (
-    "dbc/bench.dbc",
     "testing/src/zelos_testing/__init__.py",
-    "testing/src/zelos_testing/bench.py",
-    "testing/src/zelos_testing/dbc.py",
-    "testing/src/zelos_testing/dcdc.py",
     "testing/src/zelos_testing/frames.py",
     "testing/src/zelos_testing/plugin.py",
     "testing/src/zelos_testing/uds.py",
     "testing/src/zelos_testing/uds_keys.py",
-    "testing/src/zelos_testing/xcp.py",
-    "testing/suites/uds/test_dcdc_uds.py",
+    "testing/suites/uds/conftest.py",
+    "testing/suites/uds/test_uds_conformance.py",
 )
 
 
