@@ -5,72 +5,72 @@ SocketCAN, under Renode or on hardware, or the UDS extension's demo ECU in the
 test process (`--interface zelos-virtual`, with a conftest.py overriding the
 `uds_server` fixture). Requests on 0x7E0, functional on 0x7DF, responses on
 0x7E8. The contract is nodes/dcdc/src/uds.c; seed to key is
-zelos_testing.uds_keys.
+zelos_testing.uds_keys. What only the DC-DC node itself shows is
+test_dcdc_node.py.
 
-Tests marked `node` need the DC-DC itself: its DCDC_Status frames and model.
-They skip where none is on the bus. Timing checks run in real time only, with
-a 2 % margin: the node's clock runs about 0.5 % fast.
+Timing checks run in real time only, with a 2 % margin: the node's clock runs
+about 0.5 % fast.
 """
 
-import contextlib
 import os
 import struct
 import time
 import zlib
 
 import pytest
-from pyxcp.types import XcpTimeoutError
-from udsoncan import MemoryLocation
 from udsoncan.services import ECUReset
 
 from zelos_testing import frames, uds_keys
-from zelos_testing.dcdc import DB, LIMITS, LIMITS_PERIOD_S, STATUS, BmsLimits
-from zelos_testing.frames import Periodic, bound, collect, count, until
-from zelos_testing.plugin import find_a2l
+from zelos_testing.frames import bound, collect
 from zelos_testing.uds import (
+    ACTIVE_SESSION,
+    ADJUST,
+    BLOCK_LENGTH,
+    CALIBRATION,
+    CALIBRATION_ADDRESS,
+    CDTC,
+    CHECK,
+    CURRENT,
     DEFAULT,
+    DOWNLOAD_ADDRESS,
+    DOWNLOAD_SIZE,
+    DTC_OVERTEMPERATURE,
+    DTCS,
+    ERASE,
     EXTENDED,
+    FREEZE,
+    IDENTIFICATION,
+    INPUT_A,
+    INPUT_V,
     LEVEL_EXTENDED,
     LEVEL_PROGRAMMING,
+    MARGIN,
+    OUTPUT,
+    PDTC,
     PROGRAMMING,
+    RESET,
     RESPONSE,
+    RETURN,
+    S3_S,
+    SECURITY_DELAY_S,
+    SELF_TEST,
+    SELF_TEST_S,
+    SETPOINT,
+    SETPOINT_V,
+    STATE,
+    STATE_ADDRESS,
+    TEMPERATURE,
+    TF,
+    TFSLC,
+    UPTIME,
+    VIN,
+    VOLTAGE,
     NegativeResponseException,
-    UdsEcu,
+    dtcs,
+    location,
+    reset,
     transfer_block,
 )
-from zelos_testing.xcp import Ecu as XcpEcu
-
-IDENTIFICATION = {
-    0xF187: "ZLS-DCDC-0001",
-    0xF18A: "ZELOS",
-    0xF18C: "ZD00000001",
-    0xF190: "1ZLSDCDC0BENCH001",
-    0xF191: "NUCLEO-H753ZI",
-    0xF195: "DCDC-1.0.0",
-}
-VIN, ACTIVE_SESSION = 0xF190, 0xF186
-VOLTAGE, CURRENT, TEMPERATURE, UPTIME, INPUT_V, INPUT_A, SETPOINT = 0x0101, 0x0102, 0x0103, 0x0104, 0x0105, 0x0106, 0x0200
-OUTPUT = 0x0300
-RETURN, RESET, FREEZE, ADJUST = 0, 1, 2, 3
-SELF_TEST, ERASE, CHECK = 0x0201, 0xFF00, 0xFF01
-SETPOINT_V = 13.8
-
-# Memory by address: the model's state (read-only) and its calibration.
-STATE_ADDRESS, STATE = 0x00010000, struct.Struct("<7fI")
-CALIBRATION_ADDRESS, CALIBRATION = 0x00020000, struct.Struct("<2f")
-DOWNLOAD_ADDRESS, DOWNLOAD_SIZE, BLOCK_LENGTH = 0x00100000, 0x10000, 0x402
-
-DTC_OVERTEMPERATURE, DTC_UNDERVOLTAGE, DTC_OVERCURRENT, DTC_BMS_LOST = 0x1A0098, 0x1A0116, 0x1A0219, 0xC11187
-DTCS = (DTC_OVERTEMPERATURE, DTC_UNDERVOLTAGE, DTC_OVERCURRENT, DTC_BMS_LOST)
-TF, TFTOC, PDTC, CDTC, TNCSLC, TFSLC, TNCTOC, WIR = (1 << n for n in range(8))
-SNAPSHOT_DIDS = (VOLTAGE, CURRENT, TEMPERATURE, UPTIME, INPUT_V)
-
-S3_S = 5.0
-SECURITY_DELAY_S = 10.0
-SELF_TEST_S = 2.0
-MARGIN = 0.02
-
-BMS_STATUS = DB.get_message_by_name("BMS_Status")
 
 pytestmark = pytest.mark.usefixtures("bus_health")
 
@@ -86,74 +86,6 @@ def real_time():
     if frames.SIMULATED:
         pytest.skip("timing is the server's, and only hardware runs in real time")
 
-
-def wait_until(done, node_s: float, step_s: float = 0.1):
-    """Poll done() until it holds, within node_s of the server's time."""
-    end = time.monotonic() + bound(node_s)
-    while not done():
-        assert time.monotonic() < end, f"not done within {node_s} s"
-        time.sleep(step_s)
-
-
-def dtcs(ecu, mask: int = 0xFF) -> dict[int, int]:
-    return {d.id: d.status.get_byte_as_int() for d in ecu.client.get_dtc_by_status_mask(mask).service_data.dtcs}
-
-
-def cycles(bus, n: int):
-    """Wait out the node's next n DCDC_Status cycles, not ones already received."""
-    after = time.time()
-    until(bus, lambda f: sum(m.timestamp > after for m in f) >= n, ids=[STATUS.frame_id])
-
-
-def location(address: int, size: int, size_format: int = 32) -> MemoryLocation:
-    return MemoryLocation(address=address, memorysize=size, address_format=32, memorysize_format=size_format)
-
-
-def reset(ecu, kind=ECUReset.ResetType.hardReset):
-    """ECUReset, answered first, then wait until the ECU answers again."""
-    assert ecu.client.ecu_reset(kind).service_data.reset_type_echo == kind
-    ecu.wait_up(bound(5.0))
-
-
-@pytest.fixture
-def ecu(pytestconfig, uds_server):
-    interface = pytestconfig.getoption("interface")
-    # zelos-can's SocketCAN, as the Zelos agent opens it.
-    interface = "zelos-socketcan" if interface == "socketcan" else interface
-    with UdsEcu(interface, pytestconfig.getoption("channel"), timeout_s=bound(2.0), delay_s=bound(SECURITY_DELAY_S + 1)) as ecu:
-        yield ecu
-        # As found: default session, which also locks security, returns the
-        # output, ends a transfer, and enables communication and DTC setting.
-        with contextlib.suppress(Exception):
-            ecu.client.change_session(DEFAULT)
-
-
-@pytest.fixture(scope="session")
-def dcdc_node(pytestconfig, uds_server):
-    """The DC-DC node itself is on the bus: its DCDC_Status frames are."""
-    import can
-
-    with can.Bus(interface=pytestconfig.getoption("interface"), channel=pytestconfig.getoption("channel")) as b:
-        if not collect(b, bound(0.5), ids=[STATUS.frame_id]):
-            pytest.skip("no DCDC_Status on the bus: not the DC-DC node")
-
-
-node = pytest.mark.usefixtures("dcdc_node")
-
-
-@pytest.fixture
-def no_bms(bus):
-    """No BMS on the bus: the suite plays it, and stops it. Skips if a real one is there."""
-    seen = until(bus, lambda f: f[-1].arbitration_id == LIMITS.frame_id or count(f, STATUS.frame_id) >= 20)
-    if seen[-1].arbitration_id == LIMITS.frame_id:
-        pytest.skip("a BMS is on the bus: the suite cannot set or stop what it sends")
-
-
-@pytest.fixture
-def bms(bus, no_bms):
-    """BMS_Limits granting 20 A, played by the suite."""
-    with Periodic(bus, BmsLimits(aux=20.0), LIMITS_PERIOD_S):
-        yield
 
 
 # --- Identification and data ---------------------------------------------------
@@ -296,8 +228,9 @@ def test_session_control(ecu):
     for session in (PROGRAMMING, EXTENDED, DEFAULT, EXTENDED, PROGRAMMING, PROGRAMMING, DEFAULT):
         ecu.client.change_session(session)
         assert ecu.session() == session
-    with ecu.client.suppress_positive_response:
-        assert ecu.client.change_session(EXTENDED) is None
+    # Suppressed: nothing back. The wait also spaces the next request, which
+    # Zephyr's ISO-TP drops if it lands before this one is handed off.
+    assert ecu.raw(b"\x10\x83", timeout_s=bound(0.3)) is None
     assert ecu.session() == EXTENDED
 
 
@@ -450,75 +383,6 @@ def test_dtc_reports(ecu):
     assert ecu.raw(b"\x19\x02") == b"\x7f\x19\x13"
 
 
-@node
-def test_dtcs_follow_the_model_over_operation_cycles(ecu, bus, no_bms):
-    # BMS_Limits missing: the node's own test fails, with a snapshot.
-    with Periodic(bus, BmsLimits(aux=20.0), LIMITS_PERIOD_S):
-        cycles(bus, 4)
-        ecu.client.clear_dtc(0xFFFFFF)
-        cycles(bus, 2)
-        assert dtcs(ecu, TF | CDTC).get(DTC_BMS_LOST) is None
-    wait_until(lambda: dtcs(ecu, TF).get(DTC_BMS_LOST) == TF | TFTOC | PDTC | CDTC | TFSLC | WIR, 2.0)
-    assert ecu.raw(b"\x19\x03") == b"\x59\x03\xc1\x11\x87\x01"
-    snapshot = ecu.client.get_dtc_snapshot_by_dtc_number(DTC_BMS_LOST, 1).service_data.dtcs[0].snapshots[0]
-    assert snapshot.record_number == 1 and snapshot.did in SNAPSHOT_DIDS
-    assert ecu.raw(b"\x19\x06\xc1\x11\x87\x01")[6:] == b"\x01\x01"
-
-    with Periodic(bus, BmsLimits(aux=20.0), LIMITS_PERIOD_S):
-        # Healed this cycle: confirmed and pending stay.
-        wait_until(lambda: dtcs(ecu).get(DTC_BMS_LOST) == TFTOC | PDTC | CDTC | TFSLC, 2.0)
-        # A reset is a new operation cycle; the memory survives it.
-        reset(ecu)
-        cycles(bus, 4)
-        assert dtcs(ecu).get(DTC_BMS_LOST) == PDTC | CDTC | TFSLC
-        # Passing a whole cycle clears pending; three age confirmed out.
-        for status in (CDTC | TFSLC, CDTC | TFSLC, TFSLC):
-            reset(ecu)
-            cycles(bus, 4)
-            assert dtcs(ecu).get(DTC_BMS_LOST) == status
-    assert ecu.raw(b"\x19\x06\xc1\x11\x87\x01")[6:] == b"\x01\x01"  # one cycle failed
-
-
-@node
-def test_dtc_setting_off_freezes_status(ecu, bus, no_bms):
-    with Periodic(bus, BmsLimits(aux=20.0), LIMITS_PERIOD_S):
-        cycles(bus, 4)
-        ecu.client.clear_dtc(0xFFFFFF)
-        ecu.enter(EXTENDED)
-        ecu.unlock(LEVEL_EXTENDED)
-        ecu.client.control_dtc_setting(2)
-    cycles(bus, 20)  # a second without BMS_Limits
-    assert dtcs(ecu, TF | CDTC).get(DTC_BMS_LOST) is None
-    ecu.client.control_dtc_setting(1)
-    wait_until(lambda: dtcs(ecu, TF).get(DTC_BMS_LOST) is not None, 2.0)
-
-
-@node
-def test_undervoltage_overcurrent_and_overtemperature(ecu, bus, bms):
-    pack = {"PackVoltage": 200.0, "PackCurrent": 0.0, "StateOfCharge": 50.0, "ContactorState": 1, "Counter": 0}
-    with Periodic(bus, lambda: _frame(BMS_STATUS, pack), 0.1):
-        wait_until(lambda: dtcs(ecu, TF).get(DTC_UNDERVOLTAGE) is not None, 2.0)
-        assert ecu.read(INPUT_V) == 200.0
-        pack["PackVoltage"] = 380.0
-        wait_until(lambda: DTC_UNDERVOLTAGE not in dtcs(ecu, TF), 2.0)
-    # Demand recalibrated to 20 A by address: over 300 A out, then over 70 degC.
-    ecu.enter(EXTENDED)
-    ecu.unlock(LEVEL_EXTENDED)
-    original = ecu.client.read_memory_by_address(location(CALIBRATION_ADDRESS, 4)).service_data.memory_block
-    ecu.client.write_memory_by_address(location(CALIBRATION_ADDRESS, 4), struct.pack("<f", 20.0))
-    try:
-        wait_until(lambda: dtcs(ecu, TF).get(DTC_OVERCURRENT) is not None, 4.0)
-        wait_until(lambda: dtcs(ecu, TF).get(DTC_OVERTEMPERATURE) is not None, 15.0)
-        assert ecu.client.start_routine(SELF_TEST).service_data.routine_status_record == bytes([0b0101])
-    finally:
-        ecu.client.write_memory_by_address(location(CALIBRATION_ADDRESS, 4), original)
-
-
-def _frame(message, signals):
-    import can
-
-    return can.Message(arbitration_id=message.frame_id, data=message.encode(signals), is_extended_id=False)
-
 
 # --- Routines and programming -----------------------------------------------------
 
@@ -627,106 +491,3 @@ def test_ecu_reset_restores_power_on_state(ecu, kind):
     assert ecu.read(VIN) == IDENTIFICATION[VIN]
     ecu.enter(EXTENDED)
     assert nrc(ecu.client.request_seed, LEVEL_EXTENDED) == 0x37  # the power-up delay
-
-
-# --- The DC-DC node itself --------------------------------------------------------
-
-
-def status(bus) -> dict:
-    """The next DCDC_Status, decoded."""
-    after = time.time()
-    return STATUS.decode(until(bus, lambda f: f[-1].timestamp > after, ids=[STATUS.frame_id])[-1].data)
-
-
-@node
-def test_live_values_match_the_broadcast(ecu, bus):
-    # The model keeps running: bracket the read by the DCDC_Status frames just
-    # before and after it. Each value lies within what they span, to the
-    # frame's resolution, however slowly the read went.
-    started = time.time()
-    first = until(bus, lambda f: f[-1].timestamp > started, ids=[STATUS.frame_id])[-1]
-    values = ecu.client.read_data_by_identifier([VOLTAGE, CURRENT, TEMPERATURE]).service_data.values
-    read_at = time.time()
-    rest = until(bus, lambda f: f[-1].timestamp > read_at, ids=[STATUS.frame_id])
-    seen = [STATUS.decode(m.data) for m in (first, *rest)]
-    for did, signal, tol in ((VOLTAGE, "OutputVoltage", 0.05), (CURRENT, "OutputCurrent", 1.0), (TEMPERATURE, "Temperature", 1.5)):
-        lo, hi = min(f[signal] for f in seen), max(f[signal] for f in seen)
-        assert lo - tol <= values[did] <= hi + tol, f"{signal}: {values[did]} outside {lo}..{hi} +-{tol}"
-
-
-@node
-def test_setpoint_drives_the_output(ecu, bus):
-    ecu.enter(EXTENDED)
-    ecu.unlock(LEVEL_EXTENDED)
-    ecu.client.write_data_by_identifier(SETPOINT, 12.0)
-    try:
-        # Less the droop under load.
-        wait_until(lambda: 11.0 < status(bus)["OutputVoltage"] <= 12.0, 1.0)
-        ecu.client.io_control(OUTPUT, control_param=ADJUST, values=[15.0])
-        wait_until(lambda: 14.0 < status(bus)["OutputVoltage"] <= 15.0, 1.0)
-    finally:
-        ecu.client.write_data_by_identifier(SETPOINT, SETPOINT_V)
-    # Leaving the session returns the output to the ECU, at the setpoint.
-    ecu.client.change_session(DEFAULT)
-    wait_until(lambda: 13.0 < status(bus)["OutputVoltage"] <= SETPOINT_V, 1.0)
-
-
-@node
-def test_communication_control_stops_the_broadcast(ecu, bus):
-    confirmed = set(dtcs(ecu, CDTC))
-    ecu.enter(EXTENDED)
-    ecu.unlock(LEVEL_EXTENDED)
-    ecu.client.communication_control(0x01, 0x01)
-    sent_at = time.time()
-    assert ecu.read(ACTIVE_SESSION) == EXTENDED  # diagnostics still answer
-    # One frame may already be on its way: allow a cycle.
-    quiet = [m for m in collect(bus, bound(0.5), ids=[STATUS.frame_id]) if m.timestamp > sent_at + bound(STATUS.cycle_time / 1000)]
-    assert quiet == [], "DCDC_Status sent with transmission disabled"
-    ecu.client.communication_control(0x00, 0x01)
-    status(bus)
-    # Left alone, S3 ends the session and restores it.
-    ecu.client.communication_control(0x03, 0x01)
-    stopped_at = time.time()
-    resumed = until(bus, lambda f: f[-1].timestamp > stopped_at + 0.1, node_s=2 * S3_S, ids=[STATUS.frame_id])[-1].timestamp
-    if not frames.SIMULATED:
-        assert resumed - stopped_at > S3_S * (1 - MARGIN)
-    assert ecu.session() == DEFAULT
-    # Reception's gap is not a lost BMS: its timeout restarts with reception.
-    cycles(bus, 2)
-    assert set(dtcs(ecu, CDTC)) <= confirmed
-
-
-def counter(msg) -> int:
-    return STATUS.decode(msg.data)["Counter"]
-
-
-@node
-def test_reset_is_a_fresh_boot(ecu, bus):
-    # DCDC_Status's counter starts again from 0: a break in its sequence.
-    last = until(bus, lambda f: True, ids=[STATUS.frame_id])[-1:]
-    ecu.client.ecu_reset(ECUReset.ResetType.hardReset)
-    seen = until(bus, lambda f: counter(f[-1]) != (counter(([*last, *f])[-2]) + 1) % 128, ids=[STATUS.frame_id])
-    assert counter(seen[-1]) == 0
-
-
-@node
-def test_xcp_and_uds_share_the_ecu(pytestconfig, ecu, bus):
-    a2l = find_a2l(pytestconfig)
-    if a2l is None:
-        pytest.skip("no A2L: needs the `-S xcp -S uds` build and --a2l")
-    channel = pytestconfig.getoption("channel")
-    with XcpEcu(channel, a2l, timeout_s=bound(2.0)) as xcp:
-        # One calibration, two tools.
-        ecu.enter(EXTENDED)
-        ecu.unlock(LEVEL_EXTENDED)
-        original = xcp.read("DEMAND_A")
-        ecu.client.write_memory_by_address(location(CALIBRATION_ADDRESS, 4), struct.pack("<f", 1.5))
-        assert xcp.read("DEMAND_A") == pytest.approx(1.5)
-        # A UDS reset ends the XCP session: the master must connect again.
-        reset(ecu)
-        with pytest.raises(XcpTimeoutError):
-            xcp.read("temperature_c")
-    with XcpEcu(channel, a2l, timeout_s=bound(2.0)) as xcp:
-        assert xcp.epk() == xcp.a2l["epk"]["string"]
-        # The calibration was RAM: the reset restored the build's.
-        assert xcp.read("DEMAND_A") == pytest.approx(original)

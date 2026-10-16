@@ -11,11 +11,12 @@ import time
 
 import can
 import isotp
-from udsoncan import AsciiCodec, DidCodec
+from udsoncan import AsciiCodec, DidCodec, MemoryLocation
 from udsoncan.client import Client
 from udsoncan.configs import default_client_config
 from udsoncan.connections import PythonIsoTpConnection
 from udsoncan.exceptions import NegativeResponseException
+from udsoncan.services import ECUReset
 from zelos_can.bus import BUS_DEFAULTS, open_python_can_bus, prepare_bus_config
 
 from zelos_testing import frames, uds_keys
@@ -87,6 +88,51 @@ DIDS = {
     0x0200: Scaled(">H", 0.01),  # output voltage setpoint, V
 }
 IOS = {0x0300: Scaled(">H", 0.01)}  # output voltage setpoint, V
+
+# What the suites check against: identification, DIDs, routines, memory, DTCs, timing.
+IDENTIFICATION = {
+    0xF187: "ZLS-DCDC-0001",
+    0xF18A: "ZELOS",
+    0xF18C: "ZD00000001",
+    0xF190: "1ZLSDCDC0BENCH001",
+    0xF191: "NUCLEO-H753ZI",
+    0xF195: "DCDC-1.0.0",
+}
+VIN, ACTIVE_SESSION = 0xF190, 0xF186
+VOLTAGE, CURRENT, TEMPERATURE, UPTIME, INPUT_V, INPUT_A, SETPOINT = 0x0101, 0x0102, 0x0103, 0x0104, 0x0105, 0x0106, 0x0200
+OUTPUT = 0x0300
+RETURN, RESET, FREEZE, ADJUST = 0, 1, 2, 3
+SELF_TEST, ERASE, CHECK = 0x0201, 0xFF00, 0xFF01
+SETPOINT_V = 13.8
+
+# Memory by address: the model's state (read-only) and its calibration.
+STATE_ADDRESS, STATE = 0x00010000, struct.Struct("<7fI")
+CALIBRATION_ADDRESS, CALIBRATION = 0x00020000, struct.Struct("<2f")
+DOWNLOAD_ADDRESS, DOWNLOAD_SIZE, BLOCK_LENGTH = 0x00100000, 0x10000, 0x402
+
+DTC_OVERTEMPERATURE, DTC_UNDERVOLTAGE, DTC_OVERCURRENT, DTC_BMS_LOST = 0x1A0098, 0x1A0116, 0x1A0219, 0xC11187
+DTCS = (DTC_OVERTEMPERATURE, DTC_UNDERVOLTAGE, DTC_OVERCURRENT, DTC_BMS_LOST)
+TF, TFTOC, PDTC, CDTC, TNCSLC, TFSLC, TNCTOC, WIR = (1 << n for n in range(8))
+SNAPSHOT_DIDS = (VOLTAGE, CURRENT, TEMPERATURE, UPTIME, INPUT_V)
+
+S3_S = 5.0
+SELF_TEST_S = 2.0
+MARGIN = 0.02
+
+
+def dtcs(ecu: "UdsEcu", mask: int = 0xFF) -> dict[int, int]:
+    """DTC to status byte, of those whose status matches mask."""
+    return {d.id: d.status.get_byte_as_int() for d in ecu.client.get_dtc_by_status_mask(mask).service_data.dtcs}
+
+
+def location(address: int, size: int, size_format: int = 32) -> MemoryLocation:
+    return MemoryLocation(address=address, memorysize=size, address_format=32, memorysize_format=size_format)
+
+
+def reset(ecu: "UdsEcu", kind=ECUReset.ResetType.hardReset):
+    """ECUReset, answered first, then wait until the ECU answers again."""
+    assert ecu.client.ecu_reset(kind).service_data.reset_type_echo == kind
+    ecu.wait_up(frames.bound(5.0))
 
 
 # Renode models no bus time: a message's consecutive frames reach the node at
