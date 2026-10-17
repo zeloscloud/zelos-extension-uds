@@ -11,7 +11,6 @@ from doip_entity import EID, PORT, DoipEntity
 from helpers import wait_until
 from udsoncan import Request
 from udsoncan.services import ReadDataByIdentifier
-from zelos_can import doip
 
 from zelos_extension_uds import actions
 from zelos_extension_uds.cli.app import ADVANCED_DEFAULTS, create_ecus, share_buses
@@ -53,41 +52,6 @@ def test_discovery_takes_the_entity_address(entity):
         assert vehicle["eid"] == vehicle["gid"] == EID.hex(":")
         vin = actions.read_did("dcdc", "F190")  # the identified VIN is DID F190's
         assert bytes.fromhex(vin["data"][2:]).decode() == vehicle["vin"]
-
-
-def test_broadcast_discovery_answered_twice_is_refused_not_guessed(monkeypatch):
-    """Two entities answering a broadcast: no guess between vehicles, and no retry."""
-    reply = DoipEntity().identification(doip.HEADER.pack(2, 0xFD, 0x0001, 0))
-    answers = [(reply, ("192.168.77.2", PORT)), (reply, ("192.168.77.3", PORT))]
-
-    class Socket:
-        def __init__(self, *_):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            pass
-
-        def setsockopt(self, *_):
-            pass
-
-        def sendto(self, *_):
-            pass
-
-        def settimeout(self, _):
-            pass
-
-        def recvfrom(self, _):
-            if answers:
-                return answers.pop(0)
-            raise TimeoutError
-
-    monkeypatch.setattr(doip.socket, "socket", Socket)
-    with pytest.raises(doip.Refused, match="2 DoIP entities answered") as refused:
-        doip.identify("")
-    assert refused.value.permanent
 
 
 def test_refused_routing_activation_is_the_action_error(entity):

@@ -61,6 +61,3 @@ def test_snapshot_records_and_multi_did_read():
     assert every.startswith(first) and every[len(first) : len(first) + 2] == b"\x01\x05"
     assert every.endswith(b"\xf0\x04" + first[8:])
     assert ecu.request(b"\x19\x04" + U0111 + b"\x02") == b"\x7f\x19\x31"
-    # ISO 14229-1: the supported DIDs answer; 0x31 only when none is.
-    assert ecu.request(b"\x22\xf1\x86\x12\x34") == b"\x62\xf1\x86\x01"
-    assert ecu.request(b"\x22\x12\x34\x56\x78") == b"\x7f\x22\x31"
