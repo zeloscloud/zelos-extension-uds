@@ -30,7 +30,7 @@ def dtc(ecu, report: str, mask: str, dtc_id: str, record: str) -> dict:
     \b
     Example:
         main.py dtc --txid 7E0 --rxid 7E8 --mask 08
-        main.py dtc --txid 7E0 --rxid 7E8 --report extended --dtc 1A0098
+        main.py dtc --txid 7E0 --rxid 7E8 --report extended --dtc 0A9400
     """
     try:
         value = int(mask, 16)

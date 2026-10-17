@@ -374,12 +374,12 @@ def test_dtc_reports(ecu):
     assert nrc(ecu.client.clear_dtc, 0x000001) == 0x31
     ecu.client.clear_dtc(DTC_OVERTEMPERATURE)
     # Extended data 0x01 occurrences, 0x02 aging; snapshot record 0x01 only.
-    assert ecu.raw(b"\x19\x06\x1a\x00\x98\x01")[6:] == b"\x01\x00"
-    assert ecu.raw(b"\x19\x06\x1a\x00\x98\xff")[6:] == b"\x01\x00\x02\x00"
-    assert ecu.raw(b"\x19\x06\x1a\x00\x98\x03") == b"\x7f\x19\x31"
+    assert ecu.raw(b"\x19\x06\x0a\x94\x00\x01")[6:] == b"\x01\x00"
+    assert ecu.raw(b"\x19\x06\x0a\x94\x00\xff")[6:] == b"\x01\x00\x02\x00"
+    assert ecu.raw(b"\x19\x06\x0a\x94\x00\x03") == b"\x7f\x19\x31"
     assert ecu.raw(b"\x19\x04\x12\x34\x56\x01") == b"\x7f\x19\x31"
-    assert ecu.raw(b"\x19\x04\x1a\x00\x98\x02") == b"\x7f\x19\x31"
-    assert ecu.raw(b"\x19\x04\x1a\x00\x98\xff")[:5] == b"\x59\x04\x1a\x00\x98"
+    assert ecu.raw(b"\x19\x04\x0a\x94\x00\x02") == b"\x7f\x19\x31"
+    assert ecu.raw(b"\x19\x04\x0a\x94\x00\xff")[:5] == b"\x59\x04\x0a\x94\x00"
     assert ecu.raw(b"\x19\x02") == b"\x7f\x19\x13"
 
 
@@ -392,9 +392,10 @@ def test_self_test_answers_pending_then_its_result(ecu, bus):
     assert nrc(ecu.client.stop_routine, SELF_TEST) == 0x24
     started_at = time.time()
     # udsoncan waits out the pending response; the bus shows what the server sent.
-    result = ecu.client.start_routine(SELF_TEST).service_data.routine_status_record
+    with frames.reading(bus) as seen:
+        result = ecu.client.start_routine(SELF_TEST).service_data.routine_status_record
     assert len(result) == 1
-    responses = [m for m in collect(bus, 0.1, ids=[RESPONSE]) if m.timestamp >= started_at]
+    responses = [m for m in seen if m.arbitration_id == RESPONSE and not m.is_error_frame and m.timestamp >= started_at]
     payloads = [bytes(m.data[1 : 1 + m.data[0]]) for m in responses]
     assert payloads == [b"\x7f\x31\x78", b"\x71\x01\x02\x01" + result]
     if not frames.SIMULATED:

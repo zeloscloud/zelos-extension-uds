@@ -273,7 +273,7 @@ def periodic_tester_present(ecu: str, enabled: bool = False, interval: float = 2
 )
 @action.text(
     "dtc", title="DTC (hex)", description="For Snapshot and Extended Data By DTC",
-    placeholder="1A0098", default="", required=False,
+    placeholder="0A9400", default="", required=False,
 )  # fmt: skip
 @action.text(
     "record", title="Record Number", description="For Snapshot and Extended Data; 0xFF: all",

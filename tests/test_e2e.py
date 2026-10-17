@@ -146,10 +146,10 @@ def test_dtc_reports_and_control(demo):
     assert ok(actions.read_dtc("demo", "Number By Status Mask", "Test Failed"))["dtc_count"] == 1
     assert ok(actions.read_dtc("demo", "Supported DTCs"))["dtc_count"] == 4
     ids = ok(actions.read_dtc("demo", "Snapshot Identification"))["records"]
-    assert ids == [{"id": "0x1A0098", "record": 1}]
-    snapshot = ok(actions.read_dtc("demo", "Snapshot By DTC", dtc="1A0098", record="1"))
+    assert ids == [{"id": "0x0A9400", "record": 1}]
+    snapshot = ok(actions.read_dtc("demo", "Snapshot By DTC", dtc="0A9400", record="1"))
     assert snapshot["records"].startswith("0x0105")  # record 01, 5 DIDs, 0x0101 first
-    extended = ok(actions.read_dtc("demo", "Extended Data By DTC", dtc="1A0098"))
+    extended = ok(actions.read_dtc("demo", "Extended Data By DTC", dtc="0A9400"))
     assert extended["records"] == "0x01010200"  # one occurrence, aging 0
     nrc(actions.read_dtc("demo", "Snapshot By DTC", dtc="123456"), 0x31)
 
