@@ -109,8 +109,10 @@ def test_live_values_are_typed(ecu):
         assert elapsed_ms == pytest.approx(1000, rel=MARGIN, abs=20)
 
 
-def test_one_unknown_identifier_fails_the_read(ecu):
-    assert ecu.raw(b"\x22\xf1\x86\x12\x34") == b"\x7f\x22\x31"
+def test_unknown_identifiers_are_left_out_of_the_read(ecu):
+    # ISO 14229-1: the supported DIDs answer; 0x31 only when none is supported.
+    assert ecu.raw(b"\x22\xf1\x86\x12\x34") == b"\x62\xf1\x86\x01"
+    assert ecu.raw(b"\x22\x12\x34\x56\x78") == b"\x7f\x22\x31"
 
 
 def test_setpoint_and_vin_are_written_in_extended_with_level_1(ecu):

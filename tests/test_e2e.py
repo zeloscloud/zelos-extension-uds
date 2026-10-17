@@ -146,7 +146,8 @@ def test_dtc_reports_and_control(demo):
     assert ok(actions.read_dtc("demo", "Number By Status Mask", "Test Failed"))["dtc_count"] == 1
     assert ok(actions.read_dtc("demo", "Supported DTCs"))["dtc_count"] == 4
     ids = ok(actions.read_dtc("demo", "Snapshot Identification"))["records"]
-    assert ids == [{"id": "0x0A9400", "record": 1}]
+    # OBD-II first frame, the node's DIDs, OBD-II second frame.
+    assert ids == [{"id": "0x0A9400", "record": r} for r in (0x00, 0x01, 0xF0)]
     snapshot = ok(actions.read_dtc("demo", "Snapshot By DTC", dtc="0A9400", record="1"))
     assert snapshot["records"].startswith("0x0105")  # record 01, 5 DIDs, 0x0101 first
     extended = ok(actions.read_dtc("demo", "Extended Data By DTC", dtc="0A9400"))

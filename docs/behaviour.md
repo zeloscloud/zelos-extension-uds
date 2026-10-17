@@ -63,6 +63,8 @@ The bench DC-DC's UDS server, ported to Python: the contract is the firmware's (
 | Seed/key | `zelos_extension_uds/demo/key.py`, shipped; Auto-configure, `--demo` and a Demo ECU without a key file use it. Key = seed XOR 0x5A5AA5A5 (level 0x01) or 0xC3A53C5A (0x11) |
 | Power-up | Seeds answer 0x37 for 10 s after start and after each ECUReset, as the firmware's |
 | Model | The DC-DC's model, every 50 ms, without its DCDC_Status broadcast. No BMS on the bus: the demo plays one granting 20 A at 374 V (`DemoEcu.bms`; None for none) |
+| DTCs | The node's OBD-II lifecycle: pending at the first failed cycle, confirmed with warningIndicatorRequested at the second; the indicator goes after 3 passed cycles, confirmed after 40 more. An ECUReset ends a cycle. Snapshot records 0x00 and 0xF0 (first and latest frame, DIDs 0xF400 + PID) beside 0x01 |
+| ReadDataByIdentifier | Several DIDs: the supported ones answer, 0x31 only if none is |
 | DTC causes | Overcurrent and then overtemperature by calibration (demand 20 A at 0x00020000); undervoltage and BMS lost through `bms`; any test result forced through `DemoEcu.force[i]` |
 | Bus | The in-process zelos-can virtual bus by default, for the extension and tests, not other programs; `demo-ecu --interface` takes any python-can bus. The conformance suite runs on python-can's `virtual`: it times frames by receive timestamp, which zelos-virtual leaves at 0 |
 | Linux | `uv run main.py demo-ecu --interface socketcan --channel vcan0`, then any subcommand with `--interface socketcan --channel vcan0` |
