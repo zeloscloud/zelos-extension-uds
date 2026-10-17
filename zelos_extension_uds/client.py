@@ -30,9 +30,9 @@ from udsoncan import DidCodec
 from udsoncan.client import Client
 from udsoncan.connections import PythonIsoTpConnection
 from udsoncan.exceptions import NegativeResponseException, TimeoutException
+from zelos_can import doip
+from zelos_can import isotp as uds_link
 
-from zelos_extension_uds import doip
-from zelos_extension_uds import link as uds_link
 from zelos_extension_uds.constants import INTERFACES, Interface, trace_layout
 from zelos_extension_uds.trace import Trace, service_name
 

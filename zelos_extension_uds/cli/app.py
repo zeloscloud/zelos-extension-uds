@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Any
 
 import zelos_sdk
+from zelos_can import isotp as uds_link
 from zelos_sdk.extensions import load_config
 from zelos_sdk.hooks.logging import TraceLoggingHandler
 
 from .. import ACTION_PREFIX
 from .. import actions as uds_actions
-from .. import link as uds_link
 from ..client import DoipLink, SharedBus, UdsEcu
 from ..constants import (
     DEFAULT_PREFIX,

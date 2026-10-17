@@ -22,8 +22,7 @@ import zlib
 
 import can
 import isotp
-
-from zelos_extension_uds import link as uds_link
+from zelos_can import isotp as uds_link
 
 logger = logging.getLogger(__name__)
 

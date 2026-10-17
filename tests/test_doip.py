@@ -11,8 +11,9 @@ from doip_entity import EID, PORT, DoipEntity
 from helpers import wait_until
 from udsoncan import Request
 from udsoncan.services import ReadDataByIdentifier
+from zelos_can import doip
 
-from zelos_extension_uds import actions, doip
+from zelos_extension_uds import actions
 from zelos_extension_uds.cli.app import ADVANCED_DEFAULTS, create_ecus, share_buses
 from zelos_extension_uds.cli.utils import start_all, stop_all
 from zelos_extension_uds.client import State

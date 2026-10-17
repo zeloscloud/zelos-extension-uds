@@ -16,9 +16,9 @@ import pytest
 from doip_entity import ECU, FUNCTIONAL, TESTER, DoipEntity
 from udsoncan.client import Client
 from udsoncan.configs import default_client_config
+from zelos_can import doip
 from zelos_testing import uds
 
-from zelos_extension_uds import doip
 from zelos_extension_uds.demo import DemoEcu
 
 
