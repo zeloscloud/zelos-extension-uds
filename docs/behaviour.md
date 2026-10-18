@@ -20,7 +20,7 @@
 |---|---|
 | Addressing | Physical only: one request and one response id per ECU. Functional (0x7DF) is not sent |
 | CAN FD | ISO-TP frames up to 64 bytes, padded to FD lengths, bit rate switch on |
-| Padding | `isotp_padding` set: classic frames padded to 8 bytes with that byte; else unpadded |
+| Padding | classic frames padded to 8 bytes with `isotp_padding` (default 0xCC); null: unpadded |
 | Flow control | `isotp_blocksize` (default 0: one flow control per message) and `isotp_stmin` go in our flow control frames; the ECU's are followed. Over SSH each of our flow controls costs a round trip: a non-zero block size slows long responses accordingly. An ECU flow control WAIT fails the transfer (no WAIT frames accepted). Messages up to 4095 bytes |
 | Typed payloads | `int8` to `uint64`, `float`, `double`, big or little endian, packed to the type's width. `hex` takes bytes as written |
 | Reads | `representations`: every unsigned, signed and float reading of a 1, 2, 4 or 8-byte value, both byte orders |

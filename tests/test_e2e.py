@@ -273,6 +273,29 @@ def test_can_fd_and_extended_ids():
         assert max(len(m.data) for m in sent) == 64
 
 
+@pytest.mark.parametrize("padding", [0xCC, None], ids=["default", "null"])
+def test_frames_are_padded_to_dlc_8_with_cc_by_default(padding):
+    """ISO 15765-4: DLC 8 on OBD ids. Every frame we send (request, flow control) is padded
+    with 0xCC unless `isotp_padding` is null."""
+    advanced = {} if padding is not None else {"isotp_padding": None}
+    with running([{"interface": "Demo"}], **advanced) as (demo,):
+        bus, sent = demo.shared.bus, []
+        bus.send = (lambda send: lambda m, timeout=None: (sent.append(m), send(m, timeout)))(
+            bus.send
+        )
+        assert bytes.fromhex(ok(actions.read_did("demo", "F190"))["data"][2:]).decode() == (
+            demo_ecu.VIN
+        )
+    request, flow_control = (bytes(m.data) for m in sent)
+    if padding is None:
+        assert (request, flow_control) == (b"\x03\x22\xf1\x90", b"\x30\x00\x00")
+    else:
+        assert (request, flow_control) == (
+            b"\x03\x22\xf1\x90" + b"\xcc" * 4,
+            b"\x30\x00\x00" + b"\xcc" * 5,
+        )
+
+
 def _other(channel: str, **ecu) -> dict:
     config = json.dumps({"interface": "zelos-virtual", "channel": channel})
     return {"interface": "Other (python-can)", "config_json": config, **ecu}

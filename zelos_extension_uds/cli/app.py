@@ -40,7 +40,7 @@ ADVANCED_DEFAULTS: dict[str, Any] = {
     "p2_star_timeout": 5.0,
     "isotp_stmin": 0,
     "isotp_blocksize": 0,  # one flow control per message: over a slow link each costs an RTT
-    "isotp_padding": None,  # unpadded
+    "isotp_padding": 0xCC,  # ISO 15765-4 DLC 8; None: unpadded
     "tester_present_s": None,  # off
     "debug_frames": False,
 }
