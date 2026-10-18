@@ -34,6 +34,14 @@ def bound(node_s: float) -> float:
     return node_s * TIME_SCALE
 
 
+def wait_until(done: Callable[[], bool], node_s: float, step_s: float = 0.1) -> None:
+    """Poll done() until it holds, within node_s of the server's time."""
+    end = time.monotonic() + bound(node_s)
+    while not done():
+        assert time.monotonic() < end, f"not done within {node_s} s"
+        time.sleep(step_s)
+
+
 def _receive(bus: can.BusABC, seconds: float, ids: Iterable[int] | None) -> Iterator[can.Message]:
     """Data frames for host `seconds`, oldest first, optionally only these IDs."""
     wanted = None if ids is None else set(ids)

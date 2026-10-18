@@ -21,7 +21,7 @@ import pytest
 from udsoncan.services import ECUReset
 
 from zelos_testing import frames, uds_keys
-from zelos_testing.frames import bound, collect
+from zelos_testing.frames import bound, wait_until
 from zelos_testing.uds import (
     ACTIVE_SESSION,
     ADJUST,
@@ -137,8 +137,11 @@ def test_setpoint_and_vin_are_written_in_extended_with_level_1(ecu):
 
 
 def test_memory_by_address(ecu):
-    state = STATE.unpack(ecu.client.read_memory_by_address(location(STATE_ADDRESS, STATE.size)).service_data.memory_block)
-    assert state[5] == pytest.approx(SETPOINT_V)  # setpoint_v
+    def setpoint_v() -> float:
+        return STATE.unpack(ecu.client.read_memory_by_address(location(STATE_ADDRESS, STATE.size)).service_data.memory_block)[5]
+
+    # The window is the state of the last control cycle; an earlier test may just have restored the setpoint.
+    wait_until(lambda: setpoint_v() == pytest.approx(SETPOINT_V), 0.2, step_s=0.01)
     # 1- and 2-byte sizes too; nothing outside a window, nothing straddling one.
     assert len(ecu.client.read_memory_by_address(location(STATE_ADDRESS + 4, 4, 8)).service_data.memory_block) == 4
     assert len(ecu.client.read_memory_by_address(location(STATE_ADDRESS, 8, 16)).service_data.memory_block) == 8
@@ -375,7 +378,7 @@ def test_dtc_reports(ecu):
     assert count_.dtc_format == 0x01 and count_.dtc_count == len([s for s in dtcs(ecu).values() if s])
     assert nrc(ecu.client.clear_dtc, 0x000001) == 0x31
     ecu.client.clear_dtc(DTC_OVERTEMPERATURE)
-    # Extended data 0x01 occurrences, 0x02 aging; snapshot record 0x01 only.
+    # Extended data 0x01 occurrences, 0x02 aging.
     assert ecu.raw(b"\x19\x06\x0a\x94\x00\x01")[6:] == b"\x01\x00"
     assert ecu.raw(b"\x19\x06\x0a\x94\x00\xff")[6:] == b"\x01\x00\x02\x00"
     assert ecu.raw(b"\x19\x06\x0a\x94\x00\x03") == b"\x7f\x19\x31"
