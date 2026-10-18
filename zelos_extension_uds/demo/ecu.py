@@ -64,7 +64,8 @@ IDENTIFICATION = {
     0xF195: b"DCDC-1.0.0",
 }
 #: DTCs in index order: overtemperature, input undervoltage, output overcurrent, BMS lost;
-#: SAE J2012 generic codes P0A94-00, P0A09-00, P0A08-00, U0111-00.
+#: SAE J2012 generic codes P0A94-00, P0A09-00, P0A08-00, U0111-00. The firmware adds
+#: P062F-00 (0x062F00) once its flash store fails; this ECU has no flash.
 DTCS = (0x0A9400, 0x0A0900, 0x0A0800, 0xC11100)
 OVERTEMPERATURE, UNDERVOLTAGE, OVERCURRENT, BMS_LOST = range(4)
 SNAPSHOT_DIDS = (0x0101, 0x0102, 0x0103, 0x0104, 0x0105)
