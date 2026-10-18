@@ -3,7 +3,9 @@ or one DoIP connection per ECU.
 
 `SharedBus` owns a bus, its `can.Notifier` and one worker thread that opens
 the bus, attaches every ECU's ISO-TP stack, watches for failure and reopens
-with backoff. `DoipLink` is the same worker for one ECU's DoIP connection.
+with backoff. A stack hears its ECU only while a request is outstanding: an idle
+ECU sends nothing, no flow control to another tester's transfer. `DoipLink` is
+the same worker for one ECU's DoIP connection.
 `UdsEcu` serializes requests on its address pair: udsoncan is not safe for
 concurrent use of one connection.
 """
@@ -392,7 +394,7 @@ class UdsEcu:
         #: Serializes start/stop of periodic TP; set once stopping, so none starts after.
         self._tp_lock = threading.Lock()
         self._tp_closed = False
-        self._stack: isotp.NotifierBasedCanStack | None = None
+        self._stack: uds_link.QuietStack | None = None
         self._client: Client | None = None
         self.demo = None
         self.reset_at = -math.inf  # last ECUReset sent and not refused
@@ -438,7 +440,7 @@ class UdsEcu:
 
     def _attach(self, bus: can.BusABC, notifier: can.Notifier) -> None:
         """Called by the bus worker once the bus is open."""
-        stack = isotp.NotifierBasedCanStack(
+        stack = uds_link.QuietStack(
             bus=bus,
             notifier=notifier,
             address=uds_link.address(self.tx_id, self.rx_id, self.extended),
@@ -517,9 +519,11 @@ class UdsEcu:
             if client is None:
                 raise Unavailable(self.last_error or f"ECU {self.name} is {self.state}")
             self._sending = (sid, parameter)
+            stack = self._stack
             start = time.monotonic()
             try:
-                response = call(client)
+                with uds_link.listening([stack] if stack is not None else []):
+                    response = call(client)
             except NegativeResponseException as e:
                 self.counts["responses"] += 1
                 self.counts["negative"] += 1

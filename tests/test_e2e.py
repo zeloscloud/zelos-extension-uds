@@ -301,6 +301,32 @@ def _other(channel: str, **ecu) -> dict:
     return {"interface": "Other (python-can)", "config_json": config, **ecu}
 
 
+def test_idle_ecu_is_silent_during_another_testers_transfer():
+    """Another tester's transfer with our ECU, its first frames on our response id: an idle
+    connected ECU sends nothing (can-isotp alone flow-controls each). A request then sends
+    exactly its frames."""
+    server = DemoEcu("uds-idle").start()
+    wire = can.Bus(interface="zelos-virtual", channel="uds-idle", receive_own_messages=False)
+    seen: list[can.Message] = []
+    notifier = can.Notifier(wire, [seen.append], timeout=0.1)
+    try:
+        with running([_other("uds-idle", name="demo", tx_id="7E0", rx_id="7E8")]):
+            ff = bytes.fromhex("101449F190" + demo_ecu.VIN[:3].encode().hex())
+            for _ in range(5):
+                wire.send(can.Message(arbitration_id=0x7E8, is_extended_id=False, data=ff))
+                time.sleep(0.2)  # can-isotp answers within a few ms
+            assert seen == []
+            assert bytes.fromhex(ok(actions.read_did("demo", "F190"))["data"][2:]).decode() == (
+                demo_ecu.VIN
+            )
+        ours = [bytes(m.data) for m in seen if m.arbitration_id == 0x7E0]
+        assert ours == [b"\x03\x22\xf1\x90" + b"\xcc" * 4, b"\x30\x00\x00" + b"\xcc" * 5]
+    finally:
+        notifier.stop(timeout=1.0)
+        wire.shutdown()
+        server.stop()
+
+
 def test_slow_flow_control_long_blocks_within_p2():
     """ECU flow control STmin 8 ms: a 1026-byte block takes over a second to send, longer
     than P2 (1 s), which starts after the last frame."""
