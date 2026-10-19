@@ -79,7 +79,7 @@ One value each, applied to every ECU.
 | `p2_star_timeout` | `5.0` | Seconds after each response-pending (NRC 0x78) |
 | `isotp_stmin` | `0` | STmin (ms) in our flow control frames |
 | `isotp_blocksize` | `0` | Block size in our flow control frames; 0: all, one flow control per message |
-| `isotp_padding` | `204` (0xCC) | Pad sent frames to 8 bytes with this byte (ISO 15765-4 wants DLC 8 on OBD ids); null: unpadded |
+| `isotp_padding` | `204` (0xCC) | Pad sent frames to 8 bytes with this byte (ISO 15765-4 wants DLC 8 on OBD ids); empty: unpadded |
 | `tester_present_s` | none | Periodic tester present to every ECU from the start; none: off |
 | `debug_frames` | off | Log every request, response and ISO-TP frame at `DEBUG` |
 
