@@ -60,7 +60,7 @@ UDS over TCP/IP (ISO 13400-2) to a DoIP entity: an ECU on Ethernet, or a gateway
 | Transport | No ISO-TP: a request or response is one diagnostic message of any size (CAN: 4095 bytes); the `isotp_*` settings do not apply |
 | Acknowledgement | The entity acknowledges each request (0x8002); `tx` is traced then. A NACK (0x8003) or no acknowledgement within `tcp_timeout` fails the request, code named, with no `tx` row |
 | Routing activation | A refusal stops the ECU with the code named, e.g. `0x00 unknown source address`. 0x00, 0x02, 0x04, 0x06, 0x07 are not retried; other codes are, with backoff |
-| Connection | One TCP connection per ECU, reopened with backoff (3 s doubling to 60 s). An ECU reset closes it (the ECU reboots): a request before the reconnect fails |
+| Connection | One TCP connection per ECU, opened at start and held for the session (sessions and security access survive between requests; one of the entity's tester sockets stays in use), reopened with backoff (3 s doubling to 60 s). An ECU reset closes it (the ECU reboots): a request before the reconnect fails |
 | Sessions | Requests one at a time per ECU. Two ECUs on one host and port need their own tester addresses |
 | Addressing | Physical only: functional group addresses are not sent |
 | OBD port | DoIP on the OBD connector (ISO 13400-3) needs its activation line (pin 8) driven; the extension does not drive it |
