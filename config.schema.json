@@ -873,8 +873,9 @@
             "null"
           ],
           "title": "ISO-TP Padding Byte",
-          "description": "Pad every frame we send to 8 bytes with this byte (default 204 = 0xCC, as ISO 15765-4 requires on OBD ids); set null to send unpadded. CAN FD frames are always padded to a valid length.",
+          "description": "Pad every frame we send to 8 bytes with this byte (default 204 = 0xCC, as ISO 15765-4 requires on OBD ids); empty: unpadded. CAN FD frames are always padded to a valid length.",
           "default": 204,
+          "ui:emptyValue": null,
           "minimum": 0,
           "maximum": 255
         },
