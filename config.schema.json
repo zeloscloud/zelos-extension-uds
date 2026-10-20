@@ -2,7 +2,7 @@
   "$comment": "UDS extension configuration schema. See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/#configuration",
   "type": "object",
   "title": "UDS Configuration",
-  "description": "Diagnose one or more ECUs over UDS (ISO 14229) on CAN with ISO-TP.",
+  "description": "Diagnose one or more ECUs over UDS (ISO 14229) on CAN with ISO-TP, or on DoIP.",
   "ui:options": {
     "autoconfig": "UDS/auto_config"
   },
@@ -18,7 +18,7 @@
           "interface": {
             "type": "string",
             "title": "Interface",
-            "description": "How the extension reaches the ECU: SocketCAN (Linux), SocketCAN over SSH (a remote Linux device's SocketCAN over SSH, from any OS), PCAN, Kvaser, Vector, slcan, or Other (any python-can interface). Demo: a built-in simulated ECU with no hardware. ECUs on one interface and channel share one bus and must agree on its bitrate and CAN-FD settings. The bus opens when the extension starts.",
+            "description": "How the extension reaches the ECU: SocketCAN (Linux), SocketCAN over SSH (a remote Linux device's SocketCAN over SSH, from any OS), PCAN, Kvaser, Vector, slcan, or Other (any python-can interface). Demo: a built-in simulated ECU with no hardware. DoIP: UDS over TCP/IP (ISO 13400) to a DoIP entity, the ECU itself or a gateway in front of it. ECUs on one interface and channel share one bus and must agree on its bitrate and CAN-FD settings. The bus opens when the extension starts.",
             "enum": [
               "SocketCAN",
               "SocketCAN over SSH",
@@ -27,13 +27,14 @@
               "Vector",
               "slcan (serial)",
               "Other (python-can)",
-              "Demo"
+              "Demo",
+              "DoIP"
             ]
           },
           "name": {
             "type": "string",
             "title": "Name",
-            "description": "Name the actions take as `ecu` and the trace shows. Letters, digits, space, '_' and '-' only. Defaults to the CAN channel, sanitized, or 'demo'.",
+            "description": "Name the actions take as `ecu` and the trace shows. Letters, digits, space, '_' and '-' only. Defaults to the CAN channel, sanitized, 'demo' or 'doip'.",
             "pattern": "^[A-Za-z0-9 _-]*$",
             "ui:placeholder": "bms"
           },
@@ -688,6 +689,101 @@
                     ]
                   }
                 }
+              },
+              {
+                "properties": {
+                  "interface": {
+                    "enum": [
+                      "DoIP"
+                    ]
+                  },
+                  "doip": {
+                    "type": "object",
+                    "title": "DoIP",
+                    "properties": {
+                      "host": {
+                        "type": "string",
+                        "title": "Host",
+                        "description": "IP address or hostname of the DoIP entity: the ECU, or the gateway in front of it. Empty with Discover: found by a broadcast vehicle identification request, which exactly one entity must answer.",
+                        "ui:placeholder": "192.168.77.2"
+                      },
+                      "port": {
+                        "type": "integer",
+                        "title": "TCP Port",
+                        "description": "The entity's diagnostic TCP port.",
+                        "default": 13400,
+                        "minimum": 1,
+                        "maximum": 65535
+                      },
+                      "tester_address": {
+                        "type": "string",
+                        "title": "Tester Logical Address",
+                        "description": "The extension's own logical address (source address), hex. The entity must accept it in routing activation.",
+                        "pattern": "^(0[xX])?[0-9A-Fa-f]{1,4}$",
+                        "default": "0x0E80"
+                      },
+                      "ecu_address": {
+                        "type": "string",
+                        "title": "ECU Logical Address",
+                        "description": "The ECU's logical address (target address), hex. Empty with Discover: the address the entity reports, right for an ECU that is its own entity; behind a gateway set the ECU's.",
+                        "pattern": "^((0[xX])?[0-9A-Fa-f]{1,4})?$",
+                        "ui:placeholder": "0x1001"
+                      },
+                      "activation_type": {
+                        "type": "string",
+                        "title": "Routing Activation Type",
+                        "description": "Hex: 0x00 default, 0x01 WWH-OBD, 0xE0 central security, 0xE1 to 0xFF OEM-specific.",
+                        "pattern": "^(0[xX])?[0-9A-Fa-f]{1,2}$",
+                        "default": "0x00"
+                      },
+                      "tcp_timeout": {
+                        "type": "number",
+                        "title": "TCP Timeout (s)",
+                        "description": "Bounds the TCP connect and the entity's acknowledgement of each request.",
+                        "default": 2.0,
+                        "exclusiveMinimum": 0
+                      },
+                      "discover": {
+                        "type": "boolean",
+                        "title": "Discover",
+                        "description": "Before connecting, send a vehicle identification request (UDP 13400) to Host, or broadcast without one. The answer (IP, logical address, VIN, EID) shows in Get Status.",
+                        "default": false,
+                        "ui:widget": "toggle"
+                      }
+                    },
+                    "dependencies": {
+                      "discover": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "discover": {
+                                "enum": [
+                                  false
+                                ]
+                              }
+                            },
+                            "required": [
+                              "host",
+                              "ecu_address"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "discover": {
+                                "enum": [
+                                  true
+                                ]
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "doip"
+                ]
               }
             ]
           }
@@ -772,9 +868,14 @@
           "maximum": 255
         },
         "isotp_padding": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
           "title": "ISO-TP Padding Byte",
-          "description": "Pad every frame we send to 8 bytes with this byte (e.g. 204 = 0xCC); empty: unpadded. CAN FD frames are always padded to a valid length.",
+          "description": "Pad every frame we send to 8 bytes with this byte (default 204 = 0xCC, as ISO 15765-4 requires on OBD ids); empty: unpadded. CAN FD frames are always padded to a valid length.",
+          "default": 204,
+          "ui:emptyValue": null,
           "minimum": 0,
           "maximum": 255
         },

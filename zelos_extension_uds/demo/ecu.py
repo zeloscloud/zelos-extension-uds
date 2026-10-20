@@ -2,7 +2,7 @@
 
 A port of the firmware's server (zelos-examples `lib/uds/core/uds_core.c`, the
 node's `nodes/dcdc/src/uds.c` and its model in `main.c`); the contract is in
-docs/behaviour.md. The zelos-examples conformance suite runs against both.
+docs/behaviour.md.
 
 Default bus: the in-process zelos-can virtual bus, which serves the extension
 and tests, not other programs; `interface` takes any python-can bus. There is
@@ -22,8 +22,7 @@ import zlib
 
 import can
 import isotp
-
-from zelos_extension_uds import link as uds_link
+from zelos_can import isotp as uds_link
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +63,22 @@ IDENTIFICATION = {
     0xF191: b"NUCLEO-H753ZI",
     0xF195: b"DCDC-1.0.0",
 }
-#: DTCs in index order: overtemperature, input undervoltage, output overcurrent, BMS lost.
-DTCS = (0x1A0098, 0x1A0116, 0x1A0219, 0xC11187)
+#: DTCs in index order: overtemperature, input undervoltage, output overcurrent, BMS lost;
+#: SAE J2012 generic codes P0A94-00, P0A09-00, P0A08-00, U0111-00. The firmware adds
+#: P062F-00 (0x062F00) once its flash store fails; this ECU has no flash.
+DTCS = (0x0A9400, 0x0A0900, 0x0A0800, 0xC11100)
 OVERTEMPERATURE, UNDERVOLTAGE, OVERCURRENT, BMS_LOST = range(4)
 SNAPSHOT_DIDS = (0x0101, 0x0102, 0x0103, 0x0104, 0x0105)
+#: Snapshot records, in order: OBD-II first frame, the node's DIDs, OBD-II second frame.
+RECORD_FIRST, RECORD_DIDS, RECORD_LATEST = 0x00, 0x01, 0xF0
+RECORDS = (RECORD_FIRST, RECORD_DIDS, RECORD_LATEST)
 TF, TFTOC, PDTC, CDTC, TNCSLC, TFSLC, TNCTOC, WIR = (1 << n for n in range(8))
 DTC_CLEARED = TNCSLC | TNCTOC
-AGING_CYCLES = 3
+#: The firmware's Kconfig defaults: CCR 1968.2 (d)(2.2.2), (d)(2.3.2), (d)(2.4).
+CONFIRM_CYCLES, HEALING_CYCLES, AGING_CYCLES = 2, 3, 40
+#: OBD-II freeze frame PIDs (records 0x00, 0xF0), each from a snapshot DID: (PID, DID).
+FRAME_PIDS = ((0x1F, 0x0104), (0x42, 0x0101), (0x46, 0x0103), (0x5B, 0x0105))
+PACK_FULL_V, UNDERVOLTAGE_V = 400.0, 250.0
 
 # Model (nodes/dcdc/src/main.c).
 AMBIENT_C, THERMAL_GAIN_C_PER_A, THERMAL_TAU_S = 28.0, 4.5, 6.0
@@ -119,24 +127,38 @@ def _scaled(value: float, step: float, lo: int, hi: int) -> int:
 
 
 class Dtc:
-    """One DTC's memory: status, counters, snapshot. Survives a reset, not power-off."""
+    """One DTC's memory: status, counters, first and second frame (the snapshot DIDs'
+    bytes). Survives a reset, not power-off."""
 
     def __init__(self) -> None:
         self.clear()
 
     def clear(self) -> None:
         self.status, self.occurrences, self.aging = DTC_CLEARED, 0, 0
+        self.failed_cycles = self.healing = 0
         self.snapshot: bytes | None = None
+        self.latest: bytes | None = None
 
     def start_cycle(self) -> None:
-        """A new operation cycle (power-up, reset): ISO 14229-1 Annex D."""
-        if not self.status & (TFTOC | TNCTOC):  # tested and passed the whole last cycle
+        """The end of an operation cycle, at the start of the next (power-up, reset):
+        ISO 14229-1 Annex D, then the OBD-II lifecycle, CCR 1968.2 (d)(2.2)-(2.4)."""
+        tested, failed = not self.status & TNCTOC, bool(self.status & TFTOC)
+        if not failed and self.status & (CDTC | WIR) == CDTC:
+            self.aging += 1
+            if self.aging >= AGING_CYCLES:  # (d)(2.4): with the MIL off; frames go with it
+                self.status &= ~CDTC
+                self.aging = 0
+                self.snapshot = self.latest = None
+        if tested and not failed:
             self.status &= ~PDTC
-            if self.status & CDTC:
-                self.aging += 1
-                if self.aging >= AGING_CYCLES:
-                    self.status &= ~CDTC
-                    self.aging = 0
+            self.failed_cycles = 0
+            if not self.status & CDTC:  # (d)(2.2.7)(B)(i): a pending code takes its frames
+                self.snapshot = self.latest = None
+            if self.status & WIR:
+                self.healing += 1
+                if self.healing >= HEALING_CYCLES:  # (d)(2.3.2): the MIL goes off
+                    self.status &= ~WIR
+                    self.healing = 0
         self.status = (self.status & ~TFTOC) | TNCTOC
 
 
@@ -339,14 +361,25 @@ class DemoEcu:
             return
         d = self.dtcs[i]
         if not failed:
-            d.status &= ~(TF | TNCTOC | TNCSLC | WIR)
+            d.status &= ~(TF | TNCTOC | TNCSLC)  # the MIL (WIR) stays until it heals
             return
-        if not d.status & TFTOC:
+        first = not d.status & TFTOC
+        if first:
             d.occurrences = min(d.occurrences + 1, 0xFF)
-        if not d.status & TFSLC:  # record 0x01: first failure since the last clear
-            d.snapshot = b"".join(self._did(did) for did in SNAPSHOT_DIDS)
-        d.status = (d.status | TF | TFTOC | PDTC | CDTC | TFSLC | WIR) & ~(TNCTOC | TNCSLC)
-        d.aging = 0
+        # Both frames with the pending code; the second again in each later cycle.
+        if d.snapshot is None:
+            d.snapshot = d.latest = self._frame()
+        elif first:
+            d.latest = self._frame()
+        d.status = (d.status | TF | TFTOC | PDTC | TFSLC) & ~(TNCTOC | TNCSLC)
+        d.aging = d.healing = 0
+        if first:
+            d.failed_cycles = min(d.failed_cycles + 1, 0xFF)
+        if d.failed_cycles >= CONFIRM_CYCLES:  # (d)(2.2.2), (d)(2.2.5): confirmed, MIL on
+            d.status |= CDTC | WIR
+
+    def _frame(self) -> bytes:
+        return b"".join(self._did(did) for did in SNAPSHOT_DIDS)
 
     # ─── Request / tick (lib/uds/core/uds_core.c) ──────────────────────────
 
@@ -515,8 +548,9 @@ class DemoEcu:
         out = bytearray()
         for i in range(1, len(req), 2):
             value = self._did(int.from_bytes(req[i : i + 2], "big"))
-            _need(value is not None, NRC_OUT_OF_RANGE)
-            out += req[i : i + 2] + value
+            if value is not None:
+                out += req[i : i + 2] + value
+        _need(bool(out), NRC_OUT_OF_RANGE)  # ISO 14229-1: the supported DIDs; 0x31 if none
         return bytes(out)
 
     def _write_did(self, req: bytes, now: float) -> bytes:
@@ -597,7 +631,8 @@ class DemoEcu:
             _need(len(req) == 2, NRC_INCORRECT_LENGTH)
             if kind == 0x0A:
                 return bytes([0x0A, 0xFF]) + b"".join(_dtc(c, d) for c, d in pairs)
-            stored = (c.to_bytes(3, "big") + b"\x01" for c, d in pairs if d.snapshot)
+            stored = (c.to_bytes(3, "big") + bytes([r]) for c, d in pairs if d.snapshot
+                      for r in RECORDS)  # fmt: skip
             return b"\x03" + b"".join(stored)
         if kind in (0x04, 0x06):
             _need(len(req) == 6, NRC_INCORRECT_LENGTH)
@@ -606,15 +641,11 @@ class DemoEcu:
             d = self.dtcs[DTCS.index(code)]
             head = bytes([kind]) + _dtc(code, d)
             if kind == 0x04:
-                _need(record in (0x01, 0xFF), NRC_OUT_OF_RANGE)
+                _need(record in RECORDS or record == 0xFF, NRC_OUT_OF_RANGE)
                 if d.snapshot is None:
                     return head
-                body, at = bytearray([0x01, len(SNAPSHOT_DIDS)]), 0
-                for did in SNAPSHOT_DIDS:
-                    size = len(self._did(did))
-                    body += did.to_bytes(2, "big") + d.snapshot[at : at + size]
-                    at += size
-                return head + bytes(body)
+                wanted = RECORDS if record == 0xFF else (record,)
+                return head + b"".join(self._record(d, r) for r in wanted)
             _need(record in (0x01, 0x02, 0xFF), NRC_OUT_OF_RANGE)
             out = head
             if record != 0x02:
@@ -623,6 +654,22 @@ class DemoEcu:
                 out += bytes([0x02, d.aging])
             return out
         raise Nrc(NRC_SUBFUNCTION_NOT_SUPPORTED)
+
+    def _record(self, d: Dtc, record: int) -> bytes:
+        """Snapshot record: number, DID count, each DID and its value. 0x00 / 0xF0 are
+        OBD-II's frames: DIDs 0xF400 + PID (uds_obd_put_frame())."""
+        frame = d.latest if record == RECORD_LATEST else d.snapshot
+        assert frame is not None
+        values, at = {}, 0
+        for did in SNAPSHOT_DIDS:
+            size = len(self._did(did))
+            values[did], at = frame[at : at + size], at + size
+        if record == RECORD_DIDS:
+            items = [did.to_bytes(2, "big") + values[did] for did in SNAPSHOT_DIDS]
+        else:
+            items = [(0xF400 + pid).to_bytes(2, "big") + _pid(pid, values[did])
+                     for pid, did in FRAME_PIDS]  # fmt: skip
+        return bytes([record, len(items)]) + b"".join(items)
 
     def _io_control(self, req: bytes, now: float) -> bytes:
         _need(len(req) >= 4, NRC_INCORRECT_LENGTH)
@@ -751,6 +798,21 @@ class DemoEcu:
             self.downloaded = (address, size)
         self.transfer = None
         return b""
+
+
+def _pid(pid: int, raw: bytes) -> bytes:
+    """J1979 PID bytes from its DID's bytes (nodes/dcdc/src/uds.c)."""
+    if pid == 0x1F:  # run time: uptime ms -> s
+        return min(int.from_bytes(raw, "big") // 1000, 0xFFFF).to_bytes(2, "big")
+    if pid == 0x42:  # control module voltage: float V -> mV
+        return _scaled(struct.unpack(">f", raw)[0], 0.001, 0, 0xFFFF).to_bytes(2, "big")
+    if pid == 0x46:  # ambient temperature: int8 degC -> A - 40
+        return bytes([min(max(struct.unpack(">b", raw)[0] + 40, 0), 0xFF)])
+    pack = int.from_bytes(raw, "big")  # 0x5B pack life: 0.1 V, 0 % at 250 V, 100 % at 400 V
+    if pack == 0xFFFF:
+        return b"\x00"
+    life = min(max((pack * 0.1 - UNDERVOLTAGE_V) / (PACK_FULL_V - UNDERVOLTAGE_V), 0.0), 1.0)
+    return bytes([_scaled(life, 1 / 255, 0, 255)])
 
 
 def _dtc(code: int, d: Dtc) -> bytes:

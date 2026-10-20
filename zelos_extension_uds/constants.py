@@ -15,7 +15,7 @@ RESERVED_ECU_NAMES = ("log", LOG_SOURCE_NAME)
 
 
 class Interface(StrEnum):
-    """How an ECU is reached: a python-can interface, or the demo ECU."""
+    """How an ECU is reached: a python-can interface, the demo ECU, or DoIP."""
 
     ZELOS_SOCKETCAN = "zelos-socketcan"
     ZELOS_SSH_SOCKETCAN = "zelos-ssh-socketcan"
@@ -25,6 +25,7 @@ class Interface(StrEnum):
     SLCAN = "slcan"
     OTHER = "other"
     DEMO = "demo"
+    DOIP = "doip"
 
 
 #: An ECU's `interface` as configured (the label the form shows) -> how it is reached.
@@ -37,6 +38,7 @@ INTERFACES = {
     "slcan (serial)": Interface.SLCAN,
     "Other (python-can)": Interface.OTHER,
     "Demo": Interface.DEMO,
+    "DoIP": Interface.DOIP,
 }
 
 #: 0.1.x interface names -> labels; `socketcan` is the same kernel SocketCAN through
@@ -56,6 +58,7 @@ CLI_INTERFACES = {
     "zelos-socketcan": "SocketCAN",
     "zelos-ssh-socketcan": "SocketCAN over SSH",
     "slcan": "slcan (serial)",
+    "doip": "DoIP",
 }
 
 #: The ECU `--demo` and Auto-configure add; see `demo_ecu`.

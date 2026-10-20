@@ -63,14 +63,19 @@ def _ecu_field(func: Any) -> Any:
 # ─── Discovery and state ────────────────────────────────────────────────────
 
 
+#: `list_ecus` fields, those of an ECU's status it has: CAN ids or DoIP addresses.
+_LISTED = ("name", "interface", "endpoint", "tx_id", "rx_id", "tester_address", "ecu_address",
+           "state")  # fmt: skip
+
+
 @action(
     "List ECUs",
-    "Every configured ECU with its interface, endpoint, CAN ids and state: the names the "
-    "other actions accept as `ecu`.",
+    "Every configured ECU with its interface, endpoint, CAN ids or DoIP addresses and state: "
+    "the names the other actions accept as `ecu`.",
 )
 def list_ecus() -> dict[str, Any]:
     ecus = [
-        {k: s[k] for k in ("name", "interface", "endpoint", "tx_id", "rx_id", "state")}
+        {k: s[k] for k in _LISTED if k in s}
         for s in (ecu.status() for _, ecu in sorted(UDS_ECUS.items()))
     ]
     return {"ecus": ecus, "count": len(ecus)}
@@ -78,8 +83,8 @@ def list_ecus() -> dict[str, Any]:
 
 @action(
     "Get Status",
-    "State, last error, CAN ids, periodic tester present and request counters for one ECU. "
-    "Sends nothing.",
+    "State, last error, CAN ids or DoIP addresses (and, with Discover, the vehicle "
+    "identification), periodic tester present and request counters for one ECU. Sends nothing.",
 )
 @_ecu_field
 def get_status(ecu: str) -> dict[str, Any]:
@@ -268,7 +273,7 @@ def periodic_tester_present(ecu: str, enabled: bool = False, interval: float = 2
 )
 @action.text(
     "dtc", title="DTC (hex)", description="For Snapshot and Extended Data By DTC",
-    placeholder="1A0098", default="", required=False,
+    placeholder="0A9400", default="", required=False,
 )  # fmt: skip
 @action.text(
     "record", title="Record Number", description="For Snapshot and Extended Data; 0xFF: all",

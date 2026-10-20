@@ -6,7 +6,7 @@ authors = [{ name = "zeloscloud", email = "info@zeloscloud.io" }]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-keywords = ["zelos", "extension", "uds", "iso-tp", "diagnostics", "automotive"]
+keywords = ["zelos", "extension", "uds", "iso-tp", "doip", "diagnostics", "automotive"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -20,9 +20,9 @@ dependencies = [
     # Standalone actions need the at-rest harness (`zelos_sdk.extensions.actions`).
     "zelos-sdk>=0.0.12a3",
     "rich-click>=1.8.0",
-    # CAN bus runtime (`zelos_can.bus`), python-can included through the extra.
-    "zelos-can[python-can]>=0.0.11a10",
-    "can-isotp>=2.0.0",
+    # CAN bus runtime (`zelos_can.bus`) with python-can, and the diagnostics transports
+    # `zelos_can.isotp` (can-isotp) and `zelos_can.doip` (doipclient) through the extras.
+    "zelos-can[python-can,diag]>=0.0.11a13",
     "udsoncan>=1.21.0",
 ]
 
@@ -37,7 +37,6 @@ dev = [
     "pytest>=8.4.2",
     "pre-commit>=4.3.0",
     "ruff>=0.14.2",
-    "jsonschema>=4.0.0",
     "tomli>=2.3.0; python_version < '3.11'",
 ]
 
@@ -58,8 +57,6 @@ addopts = "--log-cli-level=INFO"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-# Vendored as is from zelos-examples; edited there.
-extend-exclude = ["tests/conformance/testing"]
 
 [tool.ruff.lint]
 select = [

@@ -1,6 +1,6 @@
 """Zelos UDS
 
-A Zelos extension for UDS (ISO 14229) diagnostics over CAN with ISO-TP.
+A Zelos extension for UDS (ISO 14229) diagnostics over CAN with ISO-TP, or over DoIP.
 """
 
 #: Action namespace for this extension. Single source for both surfaces: the
