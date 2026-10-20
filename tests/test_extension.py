@@ -402,3 +402,46 @@ def test_can_bus_failure(tmp_path, monkeypatch):
             assert did("ecu", "F190") == VIN
     finally:
         server.stop()
+
+
+def _send_fails(*_args, **_kwargs):
+    raise OSError("send failed")
+
+
+@pytest.mark.parametrize("case", ["failed send", "two ecus", "slow flow control"])
+def test_wire_safety(case, tmp_path, monkeypatch):
+    """A failed send is neither counted nor traced; two ECUs on one bus get only their own
+    responses; an ECU slow to take a long block (its flow control STmin 8 ms: a 1026-byte
+    block takes over P2's 1 s to send) does not time the request out: P2 starts after it."""
+    channel = f"uds-{uuid.uuid4().hex[:8]}"
+    servers = [DemoEcu(channel, stmin=8 if case == "slow flow control" else 0).start()]
+    ecus = [_can(channel, name="a")]
+    if case == "two ecus":
+        servers.append(DemoEcu(channel, request_id=0x7E1, response_id=0x7E9,
+                               functional_id=None).start())  # fmt: skip
+        ecus.append(_can(channel, name="b", tx_id="7E1", rx_id="7E9"))
+    trz = tmp_path / "uds.trz"
+    try:
+        with started(tmp_path, monkeypatch, {"ecus": ecus}, trz) as started_ecus:
+            connected(started_ecus)
+            if case == "failed send":
+                assert did("a", "F190") == VIN
+                with monkeypatch.context() as m:
+                    m.setattr(client.PythonIsoTpConnection, "send", _send_fails)
+                    assert "send failed" in actions.read_did("a", "F190")["error"]
+                metrics = actions.get_status("a")["metrics"]
+                assert metrics["requests"] == metrics["responses"] == 1
+            elif case == "two ecus":
+                assert started_ecus[0].shared is started_ecus[1].shared
+                ok(actions.session_control("b", "Extended Diagnostic Session"))
+                assert (did("a", "F186"), did("b", "F186")) == (b"\x01", b"\x03")
+            else:
+                image = random.Random(3).randbytes(4096)
+                done = ok(actions.flash_firmware("a", DOWNLOAD, data=image.hex(),
+                                                 erase_routine=ERASE))  # fmt: skip
+                assert done["block_size"] == 1024 and servers[0].download[:4096] == image
+        if case == "failed send":
+            assert _rows(trz, "UDS/a/tx")["data"] == [b"\xf1\x90"]
+    finally:
+        for server in servers:
+            server.stop()
