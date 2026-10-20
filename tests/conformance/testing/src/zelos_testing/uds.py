@@ -120,6 +120,19 @@ S3_S = 5.0
 SELF_TEST_S = 2.0
 MARGIN = 0.02
 
+# Functional TesterPresent, response suppressed: one frame, every ECU.
+TESTER_PRESENT = can.Message(arbitration_id=FUNCTIONAL, is_extended_id=False, data=bytes.fromhex("023E80CCCCCCCCCC"))
+
+
+def keep_session(bus: can.BusABC) -> frames.Periodic:
+    """Hold a non-default session through a wait timed on the host, as a tester does.
+
+    S3 runs on the node's clock, which a host wait does not bound: under Renode
+    bound() stretches the wait fivefold, and the emulation runs up to about
+    twice the host's pace while it catches up on time it fell behind.
+    """
+    return frames.Periodic(bus, lambda: TESTER_PRESENT, 0.1)
+
 
 def dtcs(ecu: "UdsEcu", mask: int = 0xFF) -> dict[int, int]:
     """DTC to status byte, of those whose status matches mask."""

@@ -106,7 +106,8 @@ def test_live_values_are_typed(ecu):
     elapsed_ms = ecu.read(UPTIME) - first
     assert elapsed_ms > 0
     if not frames.SIMULATED:
-        assert elapsed_ms == pytest.approx(1000, rel=MARGIN, abs=20)
+        # The DID is the model's sample: it steps once per 50 ms cycle.
+        assert elapsed_ms == pytest.approx(1000, rel=MARGIN, abs=20 + 50)
 
 
 def test_unknown_identifiers_are_left_out_of_the_read(ecu):
@@ -395,6 +396,8 @@ def test_dtc_reports(ecu):
 def test_self_test_answers_pending_then_its_result(ecu, bus):
     ecu.enter(EXTENDED)
     assert nrc(ecu.client.stop_routine, SELF_TEST) == 0x24
+    # Unread for the whole routine: filter in the kernel, or other traffic fills the socket.
+    bus.set_filters([{"can_id": RESPONSE, "can_mask": 0x7FF}])
     started_at = time.time()
     # udsoncan waits out the pending response; the bus shows what the server sent.
     with frames.reading(bus) as seen:
