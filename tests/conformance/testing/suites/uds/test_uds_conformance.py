@@ -46,6 +46,7 @@ from zelos_testing.uds import (
     LEVEL_PROGRAMMING,
     MARGIN,
     OUTPUT,
+    P2_STAR_S,
     PDTC,
     PROGRAMMING,
     RESET,
@@ -375,8 +376,9 @@ def test_dtc_reports(ecu):
     ecu.client.clear_dtc(0xFFFFFF)
     # Cleared: none failed since. Untested or passed since, by the model.
     assert dtcs(ecu, TF | TFSLC | CDTC | PDTC) == {}
-    count_ = ecu.client.get_number_of_dtc_by_status_mask(0xFF).service_data
-    assert count_.dtc_format == 0x01 and count_.dtc_count == len([s for s in dtcs(ecu).values() if s])
+    # The list's mask: a passing model cycle between the two reads sets none of these bits.
+    count_ = ecu.client.get_number_of_dtc_by_status_mask(TF | TFSLC | CDTC | PDTC).service_data
+    assert count_.dtc_format == 0x01 and count_.dtc_count == 0
     assert nrc(ecu.client.clear_dtc, 0x000001) == 0x31
     ecu.client.clear_dtc(DTC_OVERTEMPERATURE)
     # Extended data 0x01 occurrences, 0x02 aging.
@@ -427,7 +429,7 @@ def test_busy_while_pending(ecu):
         for request_ in (b"\x29\x01", b"\x3e\x80"):
             everyone.conn.send(request_)
         # Nothing for these: the next response is the routine's result.
-        assert everyone.conn.wait_frame(timeout=bound(SELF_TEST_S))[:4] == b"\x71\x01\x02\x01"
+        assert everyone.conn.wait_frame(timeout=bound(P2_STAR_S))[:4] == b"\x71\x01\x02\x01"
 
 
 def test_programming_sequence(ecu):

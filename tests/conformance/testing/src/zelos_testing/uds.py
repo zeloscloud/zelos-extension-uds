@@ -117,6 +117,8 @@ TF, TFTOC, PDTC, CDTC, TNCSLC, TFSLC, TNCTOC, WIR = (1 << n for n in range(8))
 SNAPSHOT_DIDS = (VOLTAGE, CURRENT, TEMPERATURE, UPTIME, INPUT_V)
 
 S3_S = 5.0
+# The server's P2*: the most a pending (0x78) response may wait for the next.
+P2_STAR_S = 5.0
 SELF_TEST_S = 2.0
 MARGIN = 0.02
 
@@ -168,8 +170,8 @@ def key(level: int, seed: bytes, params=None) -> bytes:
 class UdsEcu:
     """A tester connected to the ECU on a python-can bus. Use as a context manager.
 
-    timeout_s bounds each wait for a response, and a pending (0x78) one;
-    delay_s a wait for a security delay to end.
+    timeout_s bounds each wait for a response, and P2_STAR_S of node time a
+    pending (0x78) one; delay_s a wait for a security delay to end.
     """
 
     def __init__(self, interface: str, channel: str, timeout_s: float = 2.0, delay_s: float = SECURITY_DELAY_S):
@@ -187,7 +189,7 @@ class UdsEcu:
         config.update(
             request_timeout=None,
             p2_timeout=self.timeout_s,
-            p2_star_timeout=max(5.0, self.timeout_s),
+            p2_star_timeout=max(frames.bound(P2_STAR_S), self.timeout_s),
             # Timing is the suite's to assert, not the client's to adopt.
             use_server_timing=False,
             security_algo=key,
