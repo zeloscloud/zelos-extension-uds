@@ -56,7 +56,7 @@
 
 ## Demo ECU
 
-The bench DC-DC's UDS server, ported to Python: the contract is the firmware's (zelos-examples `nodes/dcdc/src/uds.c`, `lib/uds/core/uds_core.c`; the server contract in the UDS design), not repeated here. The zelos-examples conformance suite, vendored in `tests/conformance`, runs against it in CI on CAN: 56 pass, 8 skip (they need the DC-DC node's own frames); and over DoIP behind the DoIP entity simulator (`tests/doip_entity.py`): 55 pass, 9 skip (also the one reading the ECU's response frames off the bus).
+The bench DC-DC's UDS server, ported to Python: the contract is the firmware's (zelos-examples `nodes/dcdc/src/uds.c`, `lib/uds/core/uds_core.c`), not repeated here. The extension's tests run against it on CAN and over DoIP behind the DoIP entity simulator (`tests/doip_entity.py`).
 
 | Item | Demo |
 |---|---|
@@ -67,5 +67,5 @@ The bench DC-DC's UDS server, ported to Python: the contract is the firmware's (
 | DTCs | The node's OBD-II lifecycle: pending at the first failed cycle, confirmed with warningIndicatorRequested at the second; the indicator goes after 3 passed cycles, confirmed after 40 more. An ECUReset ends a cycle. Snapshot records 0x00 and 0xF0 (first and latest frame, DIDs 0xF400 + PID) beside 0x01 |
 | ReadDataByIdentifier | Several DIDs: the supported ones answer, 0x31 only if none is |
 | DTC causes | Overcurrent and then overtemperature by calibration (demand 20 A at 0x00020000); undervoltage and BMS lost through `bms`; any test result forced through `DemoEcu.force[i]` |
-| Bus | The in-process zelos-can virtual bus by default, for the extension and tests, not other programs; `demo-ecu --interface` takes any python-can bus. The conformance suite runs on python-can's `virtual`: it times frames by receive timestamp, which zelos-virtual leaves at 0 |
+| Bus | The in-process zelos-can virtual bus by default, for the extension and tests, not other programs; `demo-ecu --interface` takes any python-can bus |
 | Linux | `uv run main.py demo-ecu --interface socketcan --channel vcan0`, then any subcommand with `--interface socketcan --channel vcan0` |
