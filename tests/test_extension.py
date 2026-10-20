@@ -244,6 +244,8 @@ def test_every_action_once(target, tmp_path, monkeypatch):
         assert call("read_memory", "ecu", "0x00020000", "4")["representations"]["float_le"] == 3.0
         flashed = call("flash_firmware", "ecu", DOWNLOAD, data=image.hex(), erase_routine=ERASE)
         assert flashed["steps"][-1]["step"] == "check_dependencies"
+        unerased = actions.flash_firmware("ecu", DOWNLOAD, data=image.hex())  # no erase asked
+        assert unerased["failed_step"] == "request_download" and unerased["nrc"] == 0x70
         up = call("upload_memory", "ecu", DOWNLOAD, "2048")
         assert bytes.fromhex(up["data"][2:]) == image[:2048]
         call("request_upload", "ecu", DOWNLOAD, "4")
@@ -329,9 +331,16 @@ def test_bad_config_refused_before_any_bus_opens(ecus, tmp_path, monkeypatch):
         share_buses(create_ecus(config, advanced))
 
 
-def test_legacy_settings_and_the_cli_reach_the_demo(tmp_path, monkeypatch):
-    """0.1.x flat settings (one ECU), and the shell path in its own process."""
-    with started(tmp_path, monkeypatch, {"interface": "demo", "request_timeout": 3.0}) as ecus:
+@pytest.mark.parametrize("settings", ["auto-configure", "0.1.x"])
+def test_demo_settings_and_the_cli_reach_the_demo(settings, tmp_path, monkeypatch):
+    """Auto-configure's settings, 0.1.x flat settings (one ECU), and the shell path in its
+    own process."""
+    config = (
+        actions.auto_config()["config"]
+        if settings == "auto-configure"
+        else {"interface": "demo", "request_timeout": 3.0}
+    )
+    with started(tmp_path, monkeypatch, config) as ecus:
         connected(ecus)
         assert ecus[0].name == "demo" and did("demo", "F190") == VIN
     args = ["read", "--interface", "demo", "--txid", "7E0", "--rxid", "7E8", "--id", "F190"]
