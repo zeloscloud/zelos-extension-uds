@@ -279,6 +279,40 @@ def test_every_action_once(target, tmp_path, monkeypatch):
     assert called == set(actions.register_actions(SimpleNamespace(register=lambda *a, **k: None)))
 
 
+def test_action_flags():
+    """Pins each action's flags, so a new action or a changed flag is a deliberate choice."""
+    registered = {}
+    actions.register_actions(SimpleNamespace(register=lambda f, name: registered.update({name: f})))
+    flags = {n: (f._action.read_only, f._action.hidden) for n, f in registered.items()}
+    assert flags == {
+        "list_ecus": (True, True),
+        "get_status": (True, True),
+        "session_control": (False, False),
+        "read_did": (True, False),
+        "write_did": (False, False),
+        "ecu_reset": (False, False),
+        "routine_control": (False, False),
+        "io_control": (False, False),
+        "tester_present": (False, False),
+        "periodic_tester_present": (False, False),
+        "read_dtc": (True, False),
+        "clear_dtc": (False, False),
+        "control_dtc_setting": (False, False),
+        "communication_control": (False, False),
+        "security_access": (False, False),
+        "read_memory": (True, False),
+        "write_memory": (False, False),
+        "request_download": (False, True),
+        "request_upload": (False, True),
+        "transfer_data": (False, True),
+        "request_transfer_exit": (False, True),
+        "upload_memory": (False, False),
+        "flash_firmware": (False, False),
+        "auto_config": (True, True),
+        "list_interfaces": (True, True),
+    }
+
+
 def test_idle_sends_nothing(target, tmp_path, monkeypatch):
     """Connected and idle: nothing to the ECU, even while another tester's multi-frame
     response passes on our response id (CAN). A request then sends only itself."""
