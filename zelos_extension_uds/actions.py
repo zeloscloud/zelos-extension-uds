@@ -72,6 +72,8 @@ _LISTED = ("name", "interface", "endpoint", "tx_id", "rx_id", "tester_address", 
     "List ECUs",
     "Every configured ECU with its interface, endpoint, CAN ids or DoIP addresses and state: "
     "the names the other actions accept as `ecu`.",
+    read_only=True,
+    hidden=True,
 )
 def list_ecus() -> dict[str, Any]:
     ecus = [
@@ -85,6 +87,8 @@ def list_ecus() -> dict[str, Any]:
     "Get Status",
     "State, last error, CAN ids or DoIP addresses (and, with Discover, the vehicle "
     "identification), periodic tester present and request counters for one ECU. Sends nothing.",
+    read_only=True,
+    hidden=True,
 )
 @_ecu_field
 def get_status(ecu: str) -> dict[str, Any]:
@@ -134,6 +138,7 @@ def session_control(ecu: str, session_type: str = "Extended Diagnostic Session")
 @action(
     "Read Data By Identifier",
     "Read a DID (0x22): hex, and integer/float readings of 1, 2, 4 and 8-byte values.",
+    read_only=True,
 )
 @_ecu_field
 @action.text("did", title="Data Identifier (hex)", placeholder="0xF190")
@@ -257,6 +262,7 @@ def periodic_tester_present(ecu: str, enabled: bool = False, interval: float = 2
     "Read DTC Information",
     "Read DTCs (0x19): by status mask, their number, snapshot ids, a snapshot or extended "
     "data record of one DTC (raw hex), or every supported DTC.",
+    read_only=True,
 )
 @_ecu_field
 @action.select(
@@ -354,6 +360,7 @@ def security_access(ecu: str, access_level: str = "0x01", key: str = "") -> dict
 @action(
     "Read Memory By Address",
     "Read memory (0x23): 4-byte address, size in 1, 2 or 4 bytes.",
+    read_only=True,
 )
 @_ecu_field
 @action.text("address", title="Memory Address (hex)", placeholder="0x20000000")
@@ -376,7 +383,7 @@ def write_memory(
     return services.write_memory(_get_ecu(ecu), address, data, data_type, endianness)
 
 
-@action("Request Download", "Start a download to the ECU (0x34).")
+@action("Request Download", "Start a download to the ECU (0x34).", hidden=True)
 @_ecu_field
 @action.text("address", title="Memory Address (hex)", placeholder="0x08000000")
 @action.text("size", title="Data Size (bytes)", placeholder="1024")
@@ -384,7 +391,7 @@ def request_download(ecu: str, address: str, size: str) -> dict[str, Any]:
     return services.request_download(_get_ecu(ecu), address, size)
 
 
-@action("Request Upload", "Start an upload from the ECU (0x35).")
+@action("Request Upload", "Start an upload from the ECU (0x35).", hidden=True)
 @_ecu_field
 @action.text("address", title="Memory Address (hex)", placeholder="0x08000000")
 @action.text("size", title="Data Size (bytes)", placeholder="1024")
@@ -395,6 +402,7 @@ def request_upload(ecu: str, address: str, size: str) -> dict[str, Any]:
 @action(
     "Transfer Data",
     "Send one block of a download, or (data empty) fetch one block of an upload (0x36).",
+    hidden=True,
 )
 @_ecu_field
 @action.text("sequence", title="Sequence Number", description="0-255", default="1",
@@ -405,7 +413,7 @@ def transfer_data(ecu: str, sequence: str = "1", data: str = "") -> dict[str, An
     return services.transfer_data(_get_ecu(ecu), sequence, data)
 
 
-@action("Request Transfer Exit", "Finish a download or upload (0x37).")
+@action("Request Transfer Exit", "Finish a download or upload (0x37).", hidden=True)
 @_ecu_field
 def request_transfer_exit(ecu: str) -> dict[str, Any]:
     return services.request_transfer_exit(_get_ecu(ecu))
@@ -498,6 +506,8 @@ def flash_firmware(
     "Auto-configure",
     "One demo ECU, for the config form's Auto-configure button. Review it, then save and start.",
     standalone=True,
+    read_only=True,
+    hidden=True,
 )
 def auto_config() -> dict[str, Any]:
     """The app's auto-configure contract: the keys of `config` replace the form's.
@@ -513,6 +523,8 @@ def auto_config() -> dict[str, Any]:
     "field, which also accepts a name typed by hand. Empty on macOS/Windows, which have no "
     "SocketCAN.",
     standalone=True,
+    read_only=True,
+    hidden=True,
 )
 def list_interfaces() -> dict[str, Any]:
     """The app's `action-choices` contract. Reads sysfs only: no socket, no privileges."""
