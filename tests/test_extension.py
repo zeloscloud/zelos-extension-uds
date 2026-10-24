@@ -309,7 +309,6 @@ def test_idle_sends_nothing(target, tmp_path, monkeypatch):
     [
         [{"interface": "Nope"}],
         [{**PCAN, "tx_id": "7E0g"}],
-        [{"interface": "SocketCAN", "channel": "can0"}],  # no ids
         [{"interface": "DoIP", "doip": {"host": "10.0.0.2"}}],  # no ECU address, no Discover
         [{**PCAN, "tx_id": "18DA10F1"}],  # 29-bit id without Extended IDs
         [{**PCAN, "name": "a"}, {**PCAN, "name": "b"}],  # one CAN id twice on one bus
@@ -321,7 +320,7 @@ def test_idle_sends_nothing(target, tmp_path, monkeypatch):
         [{"interface": "Demo", "name": "a/b"}],
         [],
     ],
-    ids=["interface", "id", "no ids", "doip address", "29-bit", "shared id", "bitrates",
+    ids=["interface", "id", "doip address", "29-bit", "shared id", "bitrates",
          "doip tester", "key file", "name", "no ecus"],
 )  # fmt: skip
 def test_bad_config_refused_before_any_bus_opens(ecus, tmp_path, monkeypatch):
@@ -329,6 +328,14 @@ def test_bad_config_refused_before_any_bus_opens(ecus, tmp_path, monkeypatch):
     with pytest.raises((ConfigValidationError, SystemExit)):
         config, advanced = load(tmp_path, monkeypatch, {"ecus": ecus})
         share_buses(create_ecus(config, advanced))
+
+
+def test_can_ids_default_to_the_settings_form_pair(tmp_path, monkeypatch):
+    """A CAN entry that names no ids gets 0x7E0 and 0x7E8, the defaults the settings form shows."""
+    config, _ = load(
+        tmp_path, monkeypatch, {"ecus": [{"interface": "SocketCAN", "channel": "can0"}]}
+    )
+    assert (config["ecus"][0]["tx_id"], config["ecus"][0]["rx_id"]) == ("0x7E0", "0x7E8")
 
 
 @pytest.mark.parametrize("settings", ["auto-configure", "0.1.x"])

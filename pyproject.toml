@@ -18,7 +18,7 @@ classifiers = [
 ]
 dependencies = [
     # Standalone actions need the at-rest harness (`zelos_sdk.extensions.actions`).
-    "zelos-sdk>=0.0.12a3",
+    "zelos-sdk>=0.0.13a1",
     "rich-click>=1.8.0",
     # CAN bus runtime (`zelos_can.bus`) with python-can, and the diagnostics transports
     # `zelos_can.isotp` (can-isotp) and `zelos_can.doip` (doipclient) through the extras.
