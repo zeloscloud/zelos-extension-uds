@@ -1,8 +1,8 @@
 [project]
 name = "zelos-extension-uds"
 version = "0.3.0"
-description = "Unified Diagnostic Services (UDS) extension for Zelos"
-authors = [{ name = "zeloscloud", email = "info@zeloscloud.io" }]
+description = "Diagnose ECUs over UDS (ISO 14229) on CAN, CAN-FD (ISO-TP) or DoIP: sessions, DIDs, routines, DTCs, security access, memory read/write and firmware flash. SocketCAN, PCAN, Kvaser, Vector, slcan; demo ECU included."
+authors = [{ name = "Zelos", email = "support@zeloscloud.io" }]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -15,13 +15,12 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    # Standalone actions need the at-rest harness (`zelos_sdk.extensions.actions`).
     "zelos-sdk>=0.0.13a1",
     "rich-click>=1.8.0",
-    # CAN bus runtime (`zelos_can.bus`) with python-can, and the diagnostics transports
-    # `zelos_can.isotp` (can-isotp) and `zelos_can.doip` (doipclient) through the extras.
+    # The extras bring python-can and can-isotp, which the code imports directly, and doipclient for `zelos_can.doip`.
     "zelos-can[python-can,diag]>=0.0.11a13",
     "udsoncan>=1.21.0",
 ]
@@ -30,14 +29,13 @@ dependencies = [
 Homepage = "https://github.com/zeloscloud/zelos-extension-uds"
 Repository = "https://github.com/zeloscloud/zelos-extension-uds"
 Issues = "https://github.com/zeloscloud/zelos-extension-uds/issues"
-Documentation = "https://docs.zeloscloud.io/extensions"
+Documentation = "https://docs.zeloscloud.io/app/extensions/"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "pytest>=8.4.2",
-    "pre-commit>=4.3.0",
-    "ruff>=0.14.2",
-    "tomli>=2.3.0; python_version < '3.11'",
+    "pytest>=9.1.1",
+    "pre-commit>=4.6.2",
+    "ruff>=0.16.10",
 ]
 
 [build-system]
@@ -55,7 +53,7 @@ testpaths = ["tests"]
 addopts = "--log-cli-level=INFO"
 
 [tool.ruff]
-target-version = "py311"
+target-version = 'py311'
 line-length = 100
 
 [tool.ruff.lint]
@@ -72,6 +70,3 @@ select = [
 ignore = [
     "B008",   # function call in defaults (common in decorators)
 ]
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"

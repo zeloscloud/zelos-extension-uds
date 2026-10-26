@@ -227,8 +227,7 @@ def run_app_mode(demo: bool, file: Path | None) -> None:
         output_file = file
         logger.info("Recording trace to: %s", output_file)
 
-    # Register actions BEFORE init: init advertises them to the agent. The
-    # address prefix comes from `init(name=ACTION_PREFIX)`.
+    # Register actions BEFORE init: init advertises them to the agent.
     uds_actions.register_actions(zelos_sdk.actions_registry)
 
     # Log source first, so init below reuses it. Same layout rule as the data:

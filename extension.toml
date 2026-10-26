@@ -1,40 +1,24 @@
-# Zelos UDS Extension Manifest
-# See https://docs.zeloscloud.io/sdk/how-to/develop-extensions/ for full documentation
-
 name = "UDS"
 version = "0.3.0"
-description = "Unified Diagnostic Services (UDS) extension for Zelos"
+description = "Diagnose ECUs over UDS (ISO 14229) on CAN, CAN-FD (ISO-TP) or DoIP: sessions, DIDs, routines, DTCs, security access, memory read/write and firmware flash. SocketCAN, PCAN, Kvaser, Vector, slcan; demo ECU included."
 author = "Zelos"
 repository = "https://github.com/zeloscloud/zelos-extension-uds"
-homepage = "https://github.com/zeloscloud/zelos-extension-uds"
-keywords = ["uds", "automotive", "diagnostics", "can", "iso-tp", "doip"]
-categories = ["Automotive", "Diagnostics"]
-
-# File references (relative paths in archive)
+# The marketplace search and Zelos AI find an extension by these words, its name and its description.
+keywords = ["uds", "automotive", "diagnostics", "can", "iso-tp", "doip", "iso 14229", "isotp", "iso 15765", "iso 13400", "ecu", "dtc", "did", "read dtc", "clear dtc", "seed key", "reflash", "firmware update", "tester present", "nrc"]
+categories = ["Automotive", "Diagnostics", "Embedded"]
 icon = "assets/icon.png"
 readme = "README.md"
 
-# Compatibility (optional, defaults to ^25.0.20)
 [zelos]
-version = ">=26.0.8"
+version = ">=26.0.10"
 
-# Configuration schema (enables UI in Zelos App)
 [config]
 schema = "config.schema.json"
 
-[host]
-type = "agent"
-
-[host.agent]
+[agent]
+runtime = "python"
 entry = "main.py"
 python_version = "3.11"
 
-# Graceful shutdown configuration (optional, defaults to 10)
-[stop]
-grace_seconds = 10
-
 [package]
-paths = [
-    "main.py",
-    "zelos_extension_uds",
-]
+paths = ["main.py", "zelos_extension_uds"]

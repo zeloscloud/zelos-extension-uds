@@ -1,15 +1,8 @@
 """Hex string conversion and validation utilities for UDS operations."""
 
-import logging
 import struct
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
-
-# UI-facing choices for typed payload dropdowns. "Hex Bytes" preserves the
-# legacy free-form hex parsing; the rest pack a single scalar big-endian into
-# the register width implied by the type (INT16=2 bytes, FLOAT=4 bytes, etc.).
 PAYLOAD_TYPE_HEX = "hex"
 PAYLOAD_TYPE_CHOICES: list[str] = [
     PAYLOAD_TYPE_HEX,
@@ -29,20 +22,17 @@ ENDIANNESS_BIG = "big"
 ENDIANNESS_LITTLE = "little"
 ENDIANNESS_CHOICES: list[str] = [ENDIANNESS_BIG, ENDIANNESS_LITTLE]
 
-# payload_type -> (struct format char, byte size). Endianness prefix is
-# applied at pack time. Default is big-endian to match HexDidCodec.to_bytes
-# and typical ECU register convention; user-selectable per action.
-_PAYLOAD_FORMATS: dict[str, tuple[str, int]] = {
-    "int8": ("b", 1),
-    "uint8": ("B", 1),
-    "int16": ("h", 2),
-    "uint16": ("H", 2),
-    "int32": ("i", 4),
-    "uint32": ("I", 4),
-    "int64": ("q", 8),
-    "uint64": ("Q", 8),
-    "float": ("f", 4),
-    "double": ("d", 8),
+_PAYLOAD_FORMATS: dict[str, str] = {
+    "int8": "b",
+    "uint8": "B",
+    "int16": "h",
+    "uint16": "H",
+    "int32": "i",
+    "uint32": "I",
+    "int64": "q",
+    "uint64": "Q",
+    "float": "f",
+    "double": "d",
 }
 
 
@@ -175,11 +165,10 @@ def parse_typed_payload(
     if payload_type == PAYLOAD_TYPE_HEX:
         return parse_hex_string(value)
 
-    fmt = _PAYLOAD_FORMATS.get(payload_type)
-    if fmt is None:
+    fmt_char = _PAYLOAD_FORMATS.get(payload_type)
+    if fmt_char is None:
         return {"error": f"Unknown payload type: {payload_type}"}
 
-    fmt_char, _size = fmt
     cleaned = value.strip()
     if not cleaned:
         return {"error": f"Empty value for type {payload_type}"}
@@ -198,8 +187,6 @@ def parse_typed_payload(
         return {"error": f"{payload_type} value out of range '{value}'"}
 
 
-# Read-side: register-width -> list of (label, struct format char). Float is
-# only emitted at sizes where it makes sense (4-byte float, 8-byte double).
 _READ_REPRESENTATIONS: dict[int, list[tuple[str, str]]] = {
     1: [("uint8", "B"), ("int8", "b")],
     2: [("uint16", "H"), ("int16", "h")],
