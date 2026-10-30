@@ -83,8 +83,6 @@ One value each, applied to every ECU.
 | `tester_present_s` | none | Periodic tester present to every ECU from the start; none: off |
 | `debug_frames` | off | Log every request, response and ISO-TP frame at `DEBUG` |
 
-Settings from 0.1.x (one flat ECU with lowercase interface names) are read as one ECU, with a warning; save the settings to update them.
-
 ### Trace layout
 
 | What | Prefix `UDS` | Prefix cleared |
@@ -162,7 +160,7 @@ uv run main.py read --interface doip --discover --id F190      # broadcast vehic
 | `flash` | As `flash_firmware`, erase and check opt-in (`--key-file`, `--erase-routine`, `--check-routine`, `--reset`) |
 | `demo-ecu` | Runs the demo ECU on any python-can bus |
 
-Every subcommand takes `--interface` (a settings label or `socketcan` (same as `zelos-socketcan`), `zelos-ssh-socketcan`, `pcan`, `kvaser`, `vector`, `slcan`, `other`, `demo`, `doip`; any other name is passed to python-can, e.g. `ixxat`, `gs_usb`), `--channel`, `--bitrate`, `--fd`, `--data-bitrate`, `--txid`, `--rxid`, `--extended`. `zelos-ssh-socketcan` needs `--remote-host` (`--ssh-user`, `--ssh-port` optional; `--channel` is the remote interface); `other` takes `--config-json`. `--interface demo` runs the demo ECU inside the command. `--interface doip` takes `--host`, `--port`, `--tester-address`, `--ecu-address`, `--activation-type` and `--discover` instead of the CAN options.
+Every subcommand takes `--interface` (a settings label or `zelos-socketcan`, `zelos-ssh-socketcan`, `pcan`, `kvaser`, `vector`, `slcan`, `other`, `demo`, `doip`), `--channel`, `--bitrate`, `--fd`, `--data-bitrate`, `--txid`, `--rxid`, `--extended`. `zelos-ssh-socketcan` needs `--remote-host` (`--ssh-user`, `--ssh-port` optional; `--channel` is the remote interface); `other` takes `--config-json`, the bus config of any python-can interface (e.g. `ixxat`, `gs_usb`). `--interface demo` runs the demo ECU inside the command. `--interface doip` takes `--host`, `--port`, `--tester-address`, `--ecu-address`, `--activation-type` and `--discover` instead of the CAN options.
 
 ## Development
 

@@ -51,8 +51,6 @@
 |---|---|
 | Names | Rejected, not renamed, when they hold anything but letters, digits, space, `_`, `-`. `log` and `uds_log` are reserved ECU names |
 | CAN ids | Hex, with or without `0x`. Over 0x7FF without Extended IDs: refused at start |
-| 0.1.x settings | No `ecus` but a top-level `interface`: one ECU. `demo`, `socketcan` (to SocketCAN: the same kernel SocketCAN through zelos-can), `pcan`, `kvaser`, `vector`, `other` map to their labels; ids default to 0x7E0/0x7E8 as before; timeouts, `isotp_stmin`, `isotp_blocksize`, `isotp_tx_padding` and `log_level` move to Advanced; `extended_id`, or an id over 0x7FF, sets Extended IDs. Logged once |
-| Action paths | `UDS/<action>` (0.1.x: `uds/uds_client/<method>`); per-action TX/RX id overrides are gone: add an ECU per id pair |
 
 ## Demo ECU
 
@@ -68,4 +66,4 @@ The bench DC-DC's UDS server, ported to Python: the contract is the firmware's (
 | ReadDataByIdentifier | Several DIDs: the supported ones answer, 0x31 only if none is |
 | DTC causes | Overcurrent and then overtemperature by calibration (demand 20 A at 0x00020000); undervoltage and BMS lost through `bms`; any test result forced through `DemoEcu.force[i]` |
 | Bus | The in-process zelos-can virtual bus by default, for the extension and tests, not other programs; `demo-ecu --interface` takes any python-can bus |
-| Linux | `uv run main.py demo-ecu --interface socketcan --channel vcan0`, then any subcommand with `--interface socketcan --channel vcan0` |
+| Linux | `uv run main.py demo-ecu --interface socketcan --channel vcan0`, then any subcommand with `--interface zelos-socketcan --channel vcan0` |

@@ -18,7 +18,6 @@ from ..client import DoipLink, SharedBus, UdsEcu
 from ..constants import (
     DEFAULT_PREFIX,
     INTERFACES,
-    LEGACY_INTERFACES,
     LOG_SOURCE_NAME,
     RESERVED_ECU_NAMES,
     Interface,
@@ -44,42 +43,6 @@ ADVANCED_DEFAULTS: dict[str, Any] = {
     "tester_present_s": None,  # off
     "debug_frames": False,
 }
-
-#: 0.1.x top-level keys -> `advanced` keys.
-LEGACY_ADVANCED = {
-    "log_level": "log_level",
-    "request_timeout": "request_timeout",
-    "p2_timeout": "p2_timeout",
-    "p2_star_timeout": "p2_star_timeout",
-    "isotp_stmin": "isotp_stmin",
-    "isotp_blocksize": "isotp_blocksize",
-    "isotp_tx_padding": "isotp_padding",
-}
-
-
-def migrate_legacy(config: dict[str, Any]) -> dict[str, Any]:
-    """A 0.1.x config (one flat ECU, top-level `interface`) as one ECU plus `advanced`."""
-    if config.get("ecus") or "interface" not in config:
-        return config
-    logger.warning("Single-ECU settings from 0.1.x read as one ECU; save the settings to update")
-    ecu = {k: config[k] for k in ("channel", "bitrate", "config_json") if k in config}
-    ecu["interface"] = LEGACY_INTERFACES.get(config["interface"], config["interface"])
-    ecu["tx_id"] = config.get("tx_id", "0x7E0")  # 0.1.x defaults
-    ecu["rx_id"] = config.get("rx_id", "0x7E8")
-    # 0.1.x took 29-bit ids from `extended_id`, or from an id over 0x7FF.
-    ecu["extended_ids"] = bool(config.get("extended_id")) or any(
-        _over_11_bits(ecu[k]) for k in ("tx_id", "rx_id")
-    )
-    advanced = {new: config[old] for old, new in LEGACY_ADVANCED.items() if old in config}
-    # A flat config has no user-set `advanced`: any there are schema defaults, so legacy wins.
-    return {"ecus": [ecu], "advanced": {**(config.get("advanced") or {}), **advanced}}
-
-
-def _over_11_bits(text: Any) -> bool:
-    try:
-        return int(str(text), 16) > 0x7FF
-    except ValueError:
-        return False  # refused with its reason when the ECU is created
 
 
 def resolve_advanced(config: dict[str, Any]) -> dict[str, Any]:
@@ -205,7 +168,7 @@ def run_app_mode(demo: bool, file: Path | None) -> None:
     :param demo: Add a demo ECU to the configured ones
     :param file: Optional output file for trace recording
     """
-    config = migrate_legacy(load_config())
+    config = load_config()
     advanced = resolve_advanced(config)
     prefix = str(advanced.get("prefix") or "").strip()
     _exit_on(name_error(prefix, "Prefix"))

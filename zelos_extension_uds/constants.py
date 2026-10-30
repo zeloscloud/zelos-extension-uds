@@ -41,23 +41,16 @@ INTERFACES = {
     "DoIP": Interface.DOIP,
 }
 
-#: 0.1.x interface names -> labels; `socketcan` is the same kernel SocketCAN through
-#: zelos-can. Also accepted by the CLI's `--interface`.
-LEGACY_INTERFACES = {
-    "demo": "Demo",
-    "socketcan": "SocketCAN",
+#: CLI `--interface` short names -> labels.
+CLI_INTERFACES = {
+    "zelos-socketcan": "SocketCAN",
+    "zelos-ssh-socketcan": "SocketCAN over SSH",
     "pcan": "PCAN",
     "kvaser": "Kvaser",
     "vector": "Vector",
-    "other": "Other (python-can)",
-}
-
-#: CLI `--interface` short names -> labels.
-CLI_INTERFACES = {
-    **LEGACY_INTERFACES,
-    "zelos-socketcan": "SocketCAN",
-    "zelos-ssh-socketcan": "SocketCAN over SSH",
     "slcan": "slcan (serial)",
+    "other": "Other (python-can)",
+    "demo": "Demo",
     "doip": "DoIP",
 }
 

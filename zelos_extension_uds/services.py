@@ -96,8 +96,6 @@ DTC_REPORTS = {
     "Extended Data By DTC": 0x06,
     "Supported DTCs": 0x0A,
 }
-#: 0.1.x security level labels -> requestSeed sub-function.
-SECURITY_LEVELS = {"Level 1": 1, "Level 2": 3, "Level 3": 5, "Level 4": 7}
 COMM_CONTROLS = {
     "Enable Rx And Tx": 0x00,
     "Enable Rx Disable Tx": 0x01,
@@ -462,9 +460,8 @@ def communication_control(
 
 
 def _level(access_level: str | int) -> int | dict[str, Any]:
-    """requestSeed sub-function: a 0.1.x label, or the number (odd, 0x01-0x7D)."""
-    level = SECURITY_LEVELS.get(access_level) if isinstance(access_level, str) else None
-    level = level if level is not None else _number(access_level, "access level")
+    """requestSeed sub-function: the number (odd, 0x01-0x7D)."""
+    level = _number(access_level, "access level")
     if isinstance(level, dict) or level % 2 == 0 or not 0 < level < 0x7F:
         return error(f"Invalid access level: {access_level} (an odd requestSeed sub-function)")
     return level

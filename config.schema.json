@@ -903,5 +903,6 @@
   },
   "required": [
     "ecus"
-  ]
+  ],
+  "additionalProperties": false
 }
