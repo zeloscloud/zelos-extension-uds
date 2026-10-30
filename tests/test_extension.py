@@ -25,6 +25,7 @@ from zelos_sdk.actions import ActionsRegistry
 from zelos_sdk.extensions import ConfigValidationError, load_config
 
 from zelos_extension_uds import actions, client
+from zelos_extension_uds.cli import read
 from zelos_extension_uds.cli.app import (
     create_ecus,
     migrate_legacy,
@@ -424,6 +425,32 @@ def test_saved_settings_off_the_schema_exit(advanced, reason, tmp_path, monkeypa
     assert exc.value.code == 1
     errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
     assert errors == [f"Invalid configuration: {reason}"]
+
+
+@pytest.mark.parametrize("target", ["can"], indirect=True)
+def test_access_level_labels(target, tmp_path, monkeypatch):
+    """0.1.x labels: "Level 1".."Level 4" request seeds 0x01, 0x03, 0x05, 0x07."""
+    with started(tmp_path, monkeypatch, {"ecus": [target.config]}) as ecus:
+        connected(ecus)
+        ok(actions.session_control("ecu", "Extended Diagnostic Session"))
+        assert ok(actions.security_access("ecu", "Level 1"))["access_granted"]
+        for label in ("Level 2", "Level 3", "Level 4"):
+            nrc(actions.security_access("ecu", label), 0x12)
+    assert [frame[2] for frame in target.sent() if frame[1] == 0x27] == [1, 2, 3, 5, 7]
+
+
+def test_cli_takes_socketcan_and_python_can_names(capsys):
+    """`socketcan` is SocketCAN; any other name opens that python-can interface."""
+    args = ["--txid", "7E0", "--rxid", "7E8", "--id", "F190"]
+    ctx = read.make_context("read", ["--interface", "socketcan", *args])
+    assert ctx.params["interface"] == "SocketCAN"
+    channel = f"uds-{uuid.uuid4().hex[:8]}"
+    server = DemoEcu(channel, interface="virtual").start()
+    try:
+        read.main(["--interface", "virtual", "--channel", channel, *args], standalone_mode=False)
+    finally:
+        server.stop()
+    assert bytes.fromhex(json.loads(capsys.readouterr().out)["data"][2:]) == VIN
 
 
 @pytest.mark.parametrize("settings", ["auto-configure", "0.1.x"])
