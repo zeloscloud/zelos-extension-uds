@@ -2,8 +2,8 @@
 
 One global namespace keyed by an `ecu` parameter, not per-ECU action paths:
 consumers get one stable surface however many ECUs are configured, and discover
-the ECUs through `list_ecus`. An address pair is an ECU: actions take no CAN
-id overrides.
+the ECUs through `list_ecus`. With one ECU configured, `ecu` may be left unset.
+An address pair is an ECU: actions take no CAN id overrides.
 
 Functions read the shared `UDS_ECUS` registry, which `cli/app.py` populates at
 startup. Free functions, not methods, so `@action.select("ecu", choices=...)`
@@ -12,6 +12,7 @@ can reference a module-level callable at decoration time.
 
 from __future__ import annotations
 
+import functools
 import inspect
 import logging
 import sys
@@ -57,7 +58,17 @@ def _get_ecu(name: str) -> UdsEcu:
 
 
 def _ecu_field(func: Any) -> Any:
-    return action.select("ecu", title="ECU", choices=_available_ecus)(func)
+    """The `ecu` select. Unset, the action runs on the only configured ECU."""
+
+    @functools.wraps(func)
+    def call(ecu: str | None = None, *args: Any, **kwargs: Any) -> Any:
+        if not ecu:
+            if len(UDS_ECUS) != 1:
+                raise ValueError(f"Set ecu. Available: {_available_ecus()}")
+            ecu = next(iter(UDS_ECUS))
+        return func(ecu, *args, **kwargs)
+
+    return action.select("ecu", title="ECU", choices=_available_ecus, required=False)(call)
 
 
 # ─── Discovery and state ────────────────────────────────────────────────────
