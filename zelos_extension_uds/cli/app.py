@@ -9,7 +9,7 @@ from typing import Any
 
 import zelos_sdk
 from zelos_can import isotp as uds_link
-from zelos_sdk.extensions import load_config
+from zelos_sdk.extensions import ConfigValidationError, load_config
 from zelos_sdk.hooks.logging import TraceLoggingHandler
 
 from .. import ACTION_PREFIX
@@ -205,7 +205,11 @@ def run_app_mode(demo: bool, file: Path | None) -> None:
     :param demo: Add a demo ECU to the configured ones
     :param file: Optional output file for trace recording
     """
-    config = migrate_legacy(load_config())
+    try:
+        config = migrate_legacy(load_config())
+    except ConfigValidationError as e:
+        logger.error("Invalid configuration: %s", "; ".join(m.strip(" •") for m in e.errors))
+        sys.exit(1)
     advanced = resolve_advanced(config)
     prefix = str(advanced.get("prefix") or "").strip()
     _exit_on(name_error(prefix, "Prefix"))

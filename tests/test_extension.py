@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import random
 import subprocess
 import sys
@@ -395,6 +396,34 @@ def test_can_ids_default_to_the_settings_form_pair(tmp_path, monkeypatch):
         tmp_path, monkeypatch, {"ecus": [{"interface": "SocketCAN", "channel": "can0"}]}
     )
     assert (config["ecus"][0]["tx_id"], config["ecus"][0]["rx_id"]) == ("0x7E0", "0x7E8")
+
+
+@pytest.mark.parametrize(
+    ("advanced", "reason"),
+    [
+        (
+            {"log_level": "VERBOSE"},
+            "advanced.log_level: 'VERBOSE' is not one of ['DEBUG', 'INFO', 'WARNING', 'ERROR']",
+        ),
+        (
+            {"p2_timeout": 0, "isotp_stmin": 200},
+            "advanced.p2_timeout: 0 is less than the minimum of 0.01; "
+            "advanced.isotp_stmin: 200 is greater than the maximum of 127",
+        ),
+    ],
+    ids=["one error", "two errors"],
+)
+def test_saved_settings_off_the_schema_exit(advanced, reason, tmp_path, monkeypatch, caplog):
+    """Started with saved settings that fail the schema: one ERROR line, then exit 1."""
+    saved = tmp_path / "config.json"
+    saved.write_text(json.dumps({"ecus": [{"interface": "Demo"}], "advanced": advanced}))
+    monkeypatch.setenv("ZELOS_CONFIG_PATH", str(saved))
+    monkeypatch.chdir(ROOT)
+    with pytest.raises(SystemExit) as exc:
+        run_app_mode(demo=False, file=None)
+    assert exc.value.code == 1
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors == [f"Invalid configuration: {reason}"]
 
 
 @pytest.mark.parametrize("settings", ["auto-configure", "0.1.x"])
