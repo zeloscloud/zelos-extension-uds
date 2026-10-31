@@ -17,12 +17,14 @@ from types import SimpleNamespace
 import can
 import pyarrow as pa
 import pytest
+import rich_click as click
 import zelos_sdk
 from doip_entity import EID, PORT, DoipEntity
 from zelos_sdk.extensions import ConfigValidationError, load_config
 
 from zelos_extension_uds import actions, client
-from zelos_extension_uds.cli.app import create_ecus, migrate_legacy, resolve_advanced, share_buses
+from zelos_extension_uds.cli import read
+from zelos_extension_uds.cli.app import create_ecus, resolve_advanced, share_buses
 from zelos_extension_uds.cli.utils import start_all, stop_all
 from zelos_extension_uds.client import STOP_BOUND, State
 from zelos_extension_uds.demo import KEY_FILE, DemoEcu
@@ -98,11 +100,11 @@ def target(request):
 
 
 def load(tmp_path: Path, monkeypatch, config: dict) -> tuple[dict, dict]:
-    """The app's config path: config.json through the schema, the 0.1.x shim, Advanced."""
+    """The app's config path: config.json through the schema, then Advanced."""
     (tmp_path / "config.json").write_text(json.dumps(config))
     monkeypatch.setenv("ZELOS_CONFIG_PATH", str(tmp_path / "config.json"))
     monkeypatch.chdir(ROOT)
-    config = migrate_legacy(load_config())
+    config = load_config()
     return config, resolve_advanced(config)
 
 
@@ -372,16 +374,29 @@ def test_can_ids_default_to_the_settings_form_pair(tmp_path, monkeypatch):
     assert (config["ecus"][0]["tx_id"], config["ecus"][0]["rx_id"]) == ("0x7E0", "0x7E8")
 
 
-@pytest.mark.parametrize("settings", ["auto-configure", "0.1.x"])
-def test_demo_settings_and_the_cli_reach_the_demo(settings, tmp_path, monkeypatch):
-    """Auto-configure's settings, 0.1.x flat settings (one ECU), and the shell path in its
-    own process."""
-    config = (
-        actions.auto_config()["config"]
-        if settings == "auto-configure"
-        else {"interface": "demo", "request_timeout": 3.0}
+def test_flat_settings_are_refused(tmp_path, monkeypatch):
+    """An ECU's keys at the top level, with no `ecus`, fail the schema, which names them."""
+    with pytest.raises(ConfigValidationError) as exc:
+        load(tmp_path, monkeypatch, {"interface": "demo", "request_timeout": 3.0})
+    expected = (
+        "<root>: Additional properties are not allowed "
+        "('interface', 'request_timeout' were unexpected)"
     )
-    with started(tmp_path, monkeypatch, config) as ecus:
+    assert expected in str(exc.value)
+
+
+@pytest.mark.parametrize("interface", ["socketcan", "ixxat"])
+def test_cli_refuses_an_unknown_interface(interface):
+    """A name that is neither a settings label nor a short name is a usage error."""
+    args = ["--interface", interface, "--txid", "7E0", "--rxid", "7E8", "--id", "F190"]
+    with pytest.raises(click.BadParameter) as exc:
+        read.main(args, standalone_mode=False)
+    assert f"{interface!r} is not supported. Choose a label" in exc.value.format_message()
+
+
+def test_demo_settings_and_the_cli_reach_the_demo(tmp_path, monkeypatch):
+    """Auto-configure's settings, and the shell path in its own process."""
+    with started(tmp_path, monkeypatch, actions.auto_config()["config"]) as ecus:
         connected(ecus)
         assert ecus[0].name == "demo" and did("demo", "F190") == VIN
     args = ["read", "--interface", "demo", "--txid", "7E0", "--rxid", "7E8", "--id", "F190"]

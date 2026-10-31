@@ -68,10 +68,15 @@ def run_until_stopped(ecus: list[UdsEcu], buses: list[SharedBus]) -> None:
 
 
 def _label(ctx: click.Context, param: click.Parameter, value: str) -> str:
-    """A settings label or short name as its label; any other name passes to python-can."""
+    """A settings label or short name as its label."""
     if value in INTERFACES:
         return value
-    return CLI_INTERFACES.get(value.lower(), value)
+    if label := CLI_INTERFACES.get(value.lower()):
+        return label
+    raise click.BadParameter(
+        f"{value!r} is not supported. Choose a label from the settings form or one of: "
+        f"{', '.join(CLI_INTERFACES)}"
+    )
 
 
 def ecu_options(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -80,12 +85,12 @@ def ecu_options(func: Callable[..., Any]) -> Callable[..., Any]:
     options = [
         click.option(
             "--interface",
-            default="socketcan",
+            default="zelos-socketcan",
             show_default=True,
             callback=_label,
-            help="Interface: a label from the settings form, or socketcan (zelos-socketcan), "
-            "zelos-ssh-socketcan, pcan, kvaser, vector, slcan, other, demo, doip; any other "
-            "name is a python-can interface (ixxat, gs_usb, virtual, ...)",
+            help="Interface: a label from the settings form, or zelos-socketcan, "
+            "zelos-ssh-socketcan, pcan, kvaser, vector, slcan, other, demo, doip; other takes "
+            "any python-can interface through --config-json",
         ),
         click.option("--channel", default="can0", show_default=True, help="CAN channel/device"),
         click.option("--remote-host", default=None, help="zelos-ssh-socketcan: SSH host"),
@@ -157,9 +162,6 @@ def cli_ecu(
             link["bitrate"] = bitrate
         if data_bitrate:
             link["data_bitrate"] = data_bitrate
-        if interface not in INTERFACES:  # a python-can name, as 0.1.x passed it
-            config_json = json.dumps({"interface": interface, "channel": channel})
-            interface = "Other (python-can)"
         if config_json:
             link["config_json"] = config_json
         if INTERFACES[interface] == Interface.ZELOS_SSH_SOCKETCAN:

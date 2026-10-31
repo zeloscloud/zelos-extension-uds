@@ -35,7 +35,7 @@ All configuration is managed through the Zelos App settings interface.
 | **Extended IDs** | off | The two ids are 29-bit |
 | **Seed/Key File** | none | A Python file on the agent's host defining `key(level: int, seed: bytes) -> bytes`, loaded at start. Answers seeds in `security_access` (no key given) and `flash_firmware`. It runs in the extension's process. Keys are never logged |
 
-ECUs on one interface and channel share one bus: their bitrate, CAN-FD and SSH settings must match, and no CAN id may be used by two of them. Behaviour and limits: [docs/behaviour.md](docs/behaviour.md).
+ECUs on one interface and channel share one bus: their bitrate, CAN-FD and SSH settings must match, and no CAN id may be used by two of them. Behavior and limits: [docs/behavior.md](docs/behavior.md).
 
 ### DoIP
 
@@ -82,8 +82,6 @@ One value each, applied to every ECU.
 | `isotp_padding` | `204` (0xCC) | Pad sent frames to 8 bytes with this byte (ISO 15765-4 wants DLC 8 on OBD ids); empty: unpadded |
 | `tester_present_s` | none | Periodic tester present to every ECU from the start; none: off |
 | `debug_frames` | off | Log every request, response and ISO-TP frame at `DEBUG` |
-
-Settings from 0.1.x (one flat ECU with lowercase interface names) are read as one ECU, with a warning; save the settings to update them.
 
 ### Trace layout
 
@@ -162,7 +160,7 @@ uv run main.py read --interface doip --discover --id F190      # broadcast vehic
 | `flash` | As `flash_firmware`, erase and check opt-in (`--key-file`, `--erase-routine`, `--check-routine`, `--reset`) |
 | `demo-ecu` | Runs the demo ECU on any python-can bus |
 
-Every subcommand takes `--interface` (a settings label or `socketcan` (same as `zelos-socketcan`), `zelos-ssh-socketcan`, `pcan`, `kvaser`, `vector`, `slcan`, `other`, `demo`, `doip`; any other name is passed to python-can, e.g. `ixxat`, `gs_usb`), `--channel`, `--bitrate`, `--fd`, `--data-bitrate`, `--txid`, `--rxid`, `--extended`. `zelos-ssh-socketcan` needs `--remote-host` (`--ssh-user`, `--ssh-port` optional; `--channel` is the remote interface); `other` takes `--config-json`. `--interface demo` runs the demo ECU inside the command. `--interface doip` takes `--host`, `--port`, `--tester-address`, `--ecu-address`, `--activation-type` and `--discover` instead of the CAN options.
+Every subcommand takes `--interface` (a settings label or `zelos-socketcan`, `zelos-ssh-socketcan`, `pcan`, `kvaser`, `vector`, `slcan`, `other`, `demo`, `doip`), `--channel`, `--bitrate`, `--fd`, `--data-bitrate`, `--txid`, `--rxid`, `--extended`. `zelos-ssh-socketcan` needs `--remote-host` (`--ssh-user`, `--ssh-port` optional; `--channel` is the remote interface); `other` takes `--config-json`, the bus config of any python-can interface (e.g. `ixxat`, `gs_usb`). `--interface demo` runs the demo ECU inside the command. `--interface doip` takes `--host`, `--port`, `--tester-address`, `--ecu-address`, `--activation-type` and `--discover` instead of the CAN options.
 
 ## Development
 
@@ -170,7 +168,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Demo ECU
 
-`zelos_extension_uds/demo/` is the bench DC-DC's UDS server in Python, to its firmware's contract, with its seed/key file. It backs the Demo interface and the tests: [docs/behaviour.md](docs/behaviour.md#demo-ecu).
+`zelos_extension_uds/demo/` is the bench DC-DC's UDS server in Python, to its firmware's contract, with its seed/key file. It backs the Demo interface and the tests: [docs/behavior.md](docs/behavior.md#demo-ecu).
 
 `just test` runs integration sanity checks against the demo, on CAN and over DoIP through the DoIP entity simulator (`tests/doip_entity.py`: tester 0x0E80, ECU 0x1001).
 

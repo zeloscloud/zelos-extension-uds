@@ -2,7 +2,7 @@
 
 A port of the firmware's server (zelos-examples `lib/uds/core/uds_core.c`, the
 node's `nodes/dcdc/src/uds.c` and its model in `main.c`); the contract is in
-docs/behaviour.md.
+docs/behavior.md.
 
 Default bus: the in-process zelos-can virtual bus, which serves the extension
 and tests, not other programs; `interface` takes any python-can bus. There is

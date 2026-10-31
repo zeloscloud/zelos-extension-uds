@@ -3,8 +3,11 @@
     "charliermarsh.ruff",
     "ms-python.python",
     "ms-python.vscode-pylance",
+    "ms-python.debugpy",
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "bradlc.vscode-tailwindcss",
     "tamasfe.even-better-toml",
-    "redhat.vscode-yaml",
-    "ms-python.debugpy"
+    "redhat.vscode-yaml"
   ]
 }
