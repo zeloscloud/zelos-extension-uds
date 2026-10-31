@@ -105,7 +105,7 @@ A timed-out or suppressed request has a `tx` row and no `rx` row.
 
 ## Actions
 
-Available from the Zelos App and to app extensions as `UDS/<action>`, whatever the trace prefix. Each takes `ecu`; fields with a default are optional. A negative response returns `status: error` with `nrc` and `nrc_name`.
+Available from the Zelos App and to app extensions as `UDS/<action>`, whatever the trace prefix. Each takes `ecu`, which may be left unset when one ECU is configured; fields with a default are optional. A negative response returns `status: error` with `nrc` and `nrc_name`.
 
 | Action | Service | Description |
 |---|---|---|

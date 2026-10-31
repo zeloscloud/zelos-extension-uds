@@ -340,6 +340,26 @@ def test_action_flags():
     }
 
 
+def test_ecu_may_be_unset_with_one_ecu(tmp_path, monkeypatch):
+    """Called as the agent calls them: without `ecu`, the only ECU answers; with two
+    configured, the action names them."""
+    registered = {}
+    actions.register_actions(SimpleNamespace(register=lambda f, name: registered.update({name: f})))
+    schemas = [f._action.to_schema() for f in registered.values()]
+    takes_ecu = [s for s in schemas if "ecu" in s["properties"]]
+    assert len(takes_ecu) == 22
+    assert not [s["title"] for s in takes_ecu if "ecu" in s.get("required", [])]
+    execute = zelos_sdk.actions_registry.execute
+    with started(tmp_path, monkeypatch, {"ecus": [{"interface": "Demo"}]}) as ecus:
+        connected(ecus)
+        assert execute("get_status", {}).value["name"] == "demo"
+        assert execute("get_status", {"ecu": None}).value["name"] == "demo"
+        assert bytes.fromhex(execute("read_did", {"did": "F190"}).value["data"][2:]) == VIN
+        actions.UDS_ECUS["other"] = ecus[0]
+        with pytest.raises(RuntimeError, match=r"Set ecu\. Available: \['demo', 'other'\]"):
+            execute("get_status", {})
+
+
 def test_idle_sends_nothing(target, tmp_path, monkeypatch):
     """Connected and idle: nothing to the ECU, even while another tester's multi-frame
     response passes on our response id (CAN). A request then sends only itself."""
