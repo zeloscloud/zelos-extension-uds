@@ -2,6 +2,7 @@
 
 from collections.abc import Collection
 from enum import StrEnum
+from pathlib import Path
 
 import zelos_sdk
 
@@ -70,6 +71,18 @@ def demo_ecu() -> dict:
     from zelos_extension_uds.demo import KEY_FILE
 
     return {**DEMO_ECU, "key_file": str(KEY_FILE)}
+
+
+def resolve_key_file(path: str) -> str:
+    """`path`, or this install's demo key file when `path` is the demo key file in the folder
+    of any installed version: Auto-configure saves that path, and an update deletes the folder."""
+    from zelos_extension_uds.demo import KEY_FILE
+
+    # <extension>/<version>/code/zelos_extension_uds/demo/key.py: only <version> may differ.
+    saved, ours = Path(path).parts, KEY_FILE.parts
+    if len(saved) == len(ours) and saved[:-5] == ours[:-5] and saved[-4:] == ours[-4:]:
+        return str(KEY_FILE)
+    return path
 
 
 def trace_layout(prefix: str, ecu: str) -> tuple[str, str | None]:

@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import random
+import shutil
 import subprocess
 import sys
 import threading
@@ -490,6 +491,38 @@ def test_demo_settings_and_the_cli_reach_the_demo(settings, tmp_path, monkeypatc
                           text=True, timeout=30)  # fmt: skip
     assert done.returncode == 0, done.stderr
     assert bytes.fromhex(json.loads(done.stdout)["data"][2:]) == VIN
+
+
+def test_saved_demo_key_file_follows_an_update(tmp_path, monkeypatch, caplog):
+    """The demo key file's path names the installed version's folder, which an update deletes.
+    Saved by Auto-configure or by an earlier version, it loads this install's copy; the user's
+    own key file loads from where it is."""
+
+    def installed(version: str) -> Path:
+        return tmp_path / "uds" / version / "code" / "zelos_extension_uds" / "demo" / "key.py"
+
+    monkeypatch.setattr("zelos_extension_uds.demo.KEY_FILE", installed("0.3.0"))
+    auto = actions.auto_config()["config"]["ecus"][0]
+    current, own = installed("0.3.2"), tmp_path / "keys" / "key.py"
+    for copy in (current, own):
+        copy.parent.mkdir(parents=True)
+        shutil.copy(KEY_FILE, copy)
+    monkeypatch.setattr("zelos_extension_uds.demo.KEY_FILE", current)
+    config = {"ecus": [
+        auto,
+        {"name": "bench", "interface": "Demo", "key_file": str(installed("0.2.0"))},
+        {"name": "own", "interface": "Demo", "key_file": str(own)},
+    ]}  # fmt: skip
+    with started(tmp_path, monkeypatch, config) as ecus:
+        connected(ecus)
+        for name in ("demo", "bench", "own"):
+            ok(actions.session_control(name, "Extended Diagnostic Session"))
+            assert ok(actions.security_access(name, "0x01"))["access_granted"]
+    assert [m for m in caplog.messages if "seed/key from" in m] == [
+        f"ECU demo: seed/key from {current}",
+        f"ECU bench: seed/key from {current}",
+        f"ECU own: seed/key from {own}",
+    ]
 
 
 def test_doip_discovery_and_refused_activation(tmp_path, monkeypatch):
