@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Zelos UDS extension - Unified Diagnostic Services over CAN or DoIP."""
 
 import logging
@@ -7,13 +6,7 @@ from pathlib import Path
 
 import rich_click as click
 
-from zelos_extension_uds import ACTION_PREFIX as _ACTION_PREFIX
 from zelos_extension_uds import cli as cli_commands
-
-#: Re-exported so the at-rest inventory dump, which reads this entry module,
-#: sees the same namespace the live registration uses. See the definition in
-#: `zelos_extension_uds/__init__.py`.
-ACTION_PREFIX = _ACTION_PREFIX
 
 # Configure rich-click
 click.rich_click.USE_RICH_MARKUP = True

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,10 +20,17 @@ import pyarrow as pa
 import pytest
 import zelos_sdk
 from doip_entity import EID, PORT, DoipEntity
+from zelos_sdk.actions import ActionsRegistry
 from zelos_sdk.extensions import ConfigValidationError, load_config
 
 from zelos_extension_uds import actions, client
-from zelos_extension_uds.cli.app import create_ecus, migrate_legacy, resolve_advanced, share_buses
+from zelos_extension_uds.cli.app import (
+    create_ecus,
+    migrate_legacy,
+    resolve_advanced,
+    run_app_mode,
+    share_buses,
+)
 from zelos_extension_uds.cli.utils import start_all, stop_all
 from zelos_extension_uds.client import STOP_BOUND, State
 from zelos_extension_uds.demo import KEY_FILE, DemoEcu
@@ -177,6 +185,23 @@ def test_starts_from_config_and_decodes_into_trace_and_results(target, tmp_path,
     assert rx["data"][0] == b"\xf1\x90" + VIN and rx["success"][0] and rx["nrc"][0] == 0
     assert tx["data"][-1] == b"\x02\x01"  # report by status mask, testFailed
     assert rx["data"][-1][:1] == b"\x02" and b"\x0a\x94\x00" in rx["data"][-1]
+
+
+def test_actions_register_under_the_manifest_name(tmp_path, monkeypatch):
+    names: list[str | None] = []
+
+    def init(name: str | None = None, **_kwargs) -> None:
+        names.append(name)
+        raise SystemExit(0)
+
+    monkeypatch.setattr(zelos_sdk, "init", init)
+    monkeypatch.setattr(zelos_sdk, "init_global_source", lambda _name: None)
+    monkeypatch.setattr(zelos_sdk, "actions_registry", ActionsRegistry())
+    load(tmp_path, monkeypatch, {"ecus": [{"interface": "Demo"}]})
+    with pytest.raises(SystemExit):
+        run_app_mode(demo=False, file=None)
+    manifest = tomllib.loads((ROOT / "extension.toml").read_text())
+    assert names == [manifest["name"]]
 
 
 def test_session_and_security_gate(target, tmp_path, monkeypatch):

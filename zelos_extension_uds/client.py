@@ -62,9 +62,7 @@ SID_ECU_RESET = 0x11
 #: An entity closing the connection this soon after an ECU reset is the reset, not a fault.
 RESET_CLOSE_S = 5.0
 
-#: Longest a request waits for its ECU's lock: shorter than an action's 30 s timeout, so a
-#: request queued behind a long one (a flash) fails instead of being sent after its caller
-#: gave up. Periodic tester present waits TP_LOCK_TIMEOUT and skips the beat.
+#: Under an action's 30 s timeout: a request queued behind a flash fails, never sent late.
 LOCK_TIMEOUT = 20.0
 TP_LOCK_TIMEOUT = 0.1
 

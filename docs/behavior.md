@@ -1,4 +1,4 @@
-# Behaviour and limits
+# Behavior and limits
 
 ## Bus and session
 
