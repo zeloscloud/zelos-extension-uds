@@ -62,7 +62,7 @@ The bench DC-DC's UDS server, ported to Python: the contract is the firmware's (
 | Item | Demo |
 |---|---|
 | Ids | Requests 0x7E0, functional 0x7DF, responses 0x7E8, padding 0xCC, flow control BS 0 STmin 0 (`demo-ecu --stmin` sets it) |
-| Seed/key | `zelos_extension_uds/demo/key.py`, shipped; Auto-configure, `--demo` and a Demo ECU without a key file use it. Key = seed XOR 0x5A5AA5A5 (level 0x01) or 0xC3A53C5A (0x11) |
+| Seed/key | `zelos_extension_uds/demo/key.py`, shipped; Auto-configure, `--demo` and a Demo ECU without a key file use it. Saved settings that name it in any version's install folder, as Auto-configure saves it, load this install's copy, so they still start after an update. Key = seed XOR 0x5A5AA5A5 (level 0x01) or 0xC3A53C5A (0x11) |
 | Power-up | Seeds answer 0x37 for 10 s after start and after each ECUReset, as the firmware's |
 | Model | The DC-DC's model, every 50 ms, without its DCDC_Status broadcast. No BMS on the bus: the demo plays one granting 20 A at 374 V (`DemoEcu.bms`; None for none) |
 | DTCs | The node's OBD-II lifecycle: pending at the first failed cycle, confirmed with warningIndicatorRequested at the second; the indicator goes after 3 passed cycles, confirmed after 40 more. An ECUReset ends a cycle. Snapshot records 0x00 and 0xF0 (first and latest frame, DIDs 0xF400 + PID) beside 0x01 |

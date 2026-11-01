@@ -24,6 +24,7 @@ from ..constants import (
     Interface,
     demo_ecu,
     name_error,
+    resolve_key_file,
     trace_layout,
 )
 from ..keys import load_key_file
@@ -136,7 +137,7 @@ def create_ecus(config: dict[str, Any], advanced: dict[str, Any]) -> list[UdsEcu
             ecu = UdsEcu(name, interface, link, advanced)
         except ValueError as e:
             _exit_on(f"ECU '{name}': {e}")
-        key_file = (ecu_config.get("key_file") or "").strip()
+        key_file = resolve_key_file((ecu_config.get("key_file") or "").strip())
         if not key_file and interface == Interface.DEMO:
             key_file = demo_ecu()["key_file"]
         if key_file:
