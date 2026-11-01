@@ -52,7 +52,7 @@
 | Names | Rejected, not renamed, when they hold anything but letters, digits, space, `_`, `-`. `log` and `uds_log` are reserved ECU names |
 | CAN ids | Hex, with or without `0x`. Over 0x7FF without Extended IDs: refused at start |
 | Saved settings | Started with saved settings that fail the settings check: one ERROR line, `Invalid configuration: ` and each failure joined by `; `, then exit 1 |
-| 0.1.x settings | No `ecus` but a top-level `interface`: one ECU. `demo`, `socketcan` (to SocketCAN: the same kernel SocketCAN through zelos-can), `pcan`, `kvaser`, `vector`, `other` map to their labels; ids default to 0x7E0/0x7E8 as before; timeouts, `isotp_stmin`, `isotp_blocksize`, `isotp_tx_padding` and `log_level` move to Advanced; `extended_id`, or an id over 0x7FF, sets Extended IDs. Logged once |
+| 0.1.x settings | No `ecus` but a top-level `interface`: one ECU. `demo`, `socketcan` (to SocketCAN: the same kernel SocketCAN through zelos-can), `pcan`, `kvaser`, `vector`, `other` map to their labels; ids default to 0x7E0/0x7E8 as before; timeouts, `isotp_stmin`, `isotp_blocksize`, `isotp_tx_padding` and `log_level` move to Advanced; `extended_id`, or an id over 0x7FF, sets Extended IDs. Logged once. The settings check accepts this shape, so an update while the extension runs keeps them |
 | Action paths | `UDS/<action>` (0.1.x: `uds/uds_client/<method>`); per-action TX/RX id overrides are gone: add an ECU per id pair |
 
 ## Demo ECU
