@@ -3,7 +3,6 @@
 from .hex_utils import (
     ENDIANNESS_BIG,
     ENDIANNESS_CHOICES,
-    ENDIANNESS_LITTLE,
     PAYLOAD_TYPE_CHOICES,
     PAYLOAD_TYPE_HEX,
     format_hex_id,
@@ -17,7 +16,6 @@ from .hex_utils import (
 __all__ = [
     "ENDIANNESS_BIG",
     "ENDIANNESS_CHOICES",
-    "ENDIANNESS_LITTLE",
     "PAYLOAD_TYPE_CHOICES",
     "PAYLOAD_TYPE_HEX",
     "parse_hex_string",

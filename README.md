@@ -35,7 +35,7 @@ All configuration is managed through the Zelos App settings interface.
 | **Extended IDs** | off | The two ids are 29-bit |
 | **Seed/Key File** | none | A Python file on the agent's host defining `key(level: int, seed: bytes) -> bytes`, loaded at start. Answers seeds in `security_access` (no key given) and `flash_firmware`. It runs in the extension's process. Keys are never logged |
 
-ECUs on one interface and channel share one bus: their bitrate, CAN-FD and SSH settings must match, and no CAN id may be used by two of them. Behaviour and limits: [docs/behaviour.md](docs/behaviour.md).
+ECUs on one interface and channel share one bus: their bitrate, CAN-FD and SSH settings must match, and no CAN id may be used by two of them. Behavior and limits: [docs/behavior.md](docs/behavior.md).
 
 ### DoIP
 
@@ -170,7 +170,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Demo ECU
 
-`zelos_extension_uds/demo/` is the bench DC-DC's UDS server in Python, to its firmware's contract, with its seed/key file. It backs the Demo interface and the tests: [docs/behaviour.md](docs/behaviour.md#demo-ecu).
+`zelos_extension_uds/demo/` is the bench DC-DC's UDS server in Python, to its firmware's contract, with its seed/key file. It backs the Demo interface and the tests: [docs/behavior.md](docs/behavior.md#demo-ecu).
 
 `just test` runs integration sanity checks against the demo, on CAN and over DoIP through the DoIP entity simulator (`tests/doip_entity.py`: tester 0x0E80, ECU 0x1001).
 

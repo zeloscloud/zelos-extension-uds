@@ -201,7 +201,7 @@
                   "ssh_extra_opts": {
                     "type": "string",
                     "title": "SSH Extra Options",
-                    "description": "Additional ssh command-line options, space-separated (e.g. -J bastion). Placed before the options above; ssh honours the first -o it sees, so these win over the settings above."
+                    "description": "Additional ssh command-line options, space-separated (e.g. -J bastion). Placed before the options above; ssh honors the first -o it sees, so these win over the settings above."
                   },
                   "ssh_hw_timestamps": {
                     "type": "boolean",

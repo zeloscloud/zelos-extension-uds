@@ -1,7 +1,7 @@
 version: 2
 updates:
-  # Python dependencies
-  - package-ecosystem: "pip"
+  # Agent runtime: pyproject.toml and uv.lock
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "monthly"
@@ -10,8 +10,6 @@ updates:
       dependencies:
         patterns:
           - "*"
-    labels:
-      - "dependencies"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -23,5 +21,3 @@ updates:
       dependencies:
         patterns:
           - "*"
-    labels:
-      - "dependencies"

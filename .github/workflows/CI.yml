@@ -2,41 +2,53 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test
+  check:
+    name: Check
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v7
+      # Agent runtime: uv installs the Python version pinned in .python-version.
+      - uses: astral-sh/setup-uv@v10.3.3
+        if: hashFiles('pyproject.toml') != ''
         with:
           enable-cache: true
 
-      - uses: actions/setup-python@v6
+      # Web project (tab and panels)
+      - uses: actions/setup-node@v7
+        if: hashFiles('web/package.json') != ''
         with:
-          python-version: "3.11"
+          node-version-file: web/.nvmrc
 
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
 
-      - name: Verify uv.lock is in sync with pyproject.toml
-        # CI runs on Linux only; a stale lock otherwise ships in the marketplace
-        # package and fails at install on other platforms.
-        run: uv lock --locked
+      - name: Install Zelos CLI
+        run: |
+          curl -fsSL https://release.zeloscloud.io/cli/install.sh | bash
+          echo "$HOME/.zelos/bin" >> "$GITHUB_PATH"
+        env:
+          INSTALLER_NO_MODIFY_PATH: 1
 
       - name: Install dependencies
         run: just ci-install
 
-      - name: Run linting
+      - name: Check formatting and lint, and type-check the web project
         run: just check
 
       - name: Run tests
         run: just test
+
+      - name: Build and package extension
+        run: just package
