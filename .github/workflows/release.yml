@@ -59,6 +59,9 @@ jobs:
           echo "$HOME/.zelos/bin" >> $GITHUB_PATH
         env:
           INSTALLER_NO_MODIFY_PATH: 1
+          # 0.1.11 refuses this manifest's [host]/[runtime] form; 0.1.9 packages it.
+          # Unpin once the manifest moves to [agent]/[app].
+          ZELOS_VERSION: "0.1.9"
 
       - name: Install dependencies
         run: just ci-install
