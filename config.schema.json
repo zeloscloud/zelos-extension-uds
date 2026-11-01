@@ -901,7 +901,15 @@
       }
     }
   },
-  "required": [
-    "ecus"
-  ]
+  "if": {
+    "$comment": "Settings saved by 0.1.x: one ECU at the top level, which the extension converts.",
+    "required": [
+      "interface"
+    ]
+  },
+  "else": {
+    "required": [
+      "ecus"
+    ]
+  }
 }

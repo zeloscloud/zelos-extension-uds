@@ -22,6 +22,7 @@ import pyarrow as pa
 import pytest
 import zelos_sdk
 from doip_entity import EID, PORT, DoipEntity
+from jsonschema import Draft202012Validator
 from zelos_sdk.actions import ActionsRegistry
 from zelos_sdk.extensions import ConfigValidationError, load_config
 
@@ -418,6 +419,24 @@ def test_can_ids_default_to_the_settings_form_pair(tmp_path, monkeypatch):
         tmp_path, monkeypatch, {"ecus": [{"interface": "SocketCAN", "channel": "can0"}]}
     )
     assert (config["ecus"][0]["tx_id"], config["ecus"][0]["rx_id"]) == ("0x7E0", "0x7E8")
+
+
+@pytest.mark.parametrize(
+    ("saved", "errors"),
+    [
+        ({"interface": "demo", "request_timeout": 3.0}, []),
+        ({"interface": "socketcan", "channel": "can0", "tx_id": "7E1", "rx_id": "7E9"}, []),
+        ({"ecus": [{"interface": "Demo"}]}, []),
+        ({}, ["'ecus' is a required property"]),
+        ({"advanced": {"log_level": "DEBUG"}}, ["'ecus' is a required property"]),
+    ],
+    ids=["0.1.x demo", "0.1.x socketcan", "ecus", "nothing", "no ecus"],
+)
+def test_update_check_takes_0_1_x_settings(saved, errors):
+    """An update of a running extension checks its saved settings against the new schema as
+    saved, with no defaults filled in: the 0.1.x flat shape passes, for app mode to convert."""
+    schema = json.loads((ROOT / "config.schema.json").read_text())
+    assert [e.message for e in Draft202012Validator(schema).iter_errors(saved)] == errors
 
 
 @pytest.mark.parametrize(
