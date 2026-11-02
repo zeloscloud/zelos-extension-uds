@@ -1,5 +1,5 @@
 name = "UDS"
-version = "0.4.0"
+version = "0.4.1"
 description = "Diagnose ECUs over UDS (ISO 14229) on CAN, CAN-FD (ISO-TP) or DoIP: sessions, DIDs, routines, DTCs, security access, memory read/write and firmware flash. SocketCAN, PCAN, Kvaser, Vector, slcan; demo ECU included."
 author = "Zelos"
 repository = "https://github.com/zeloscloud/zelos-extension-uds"
