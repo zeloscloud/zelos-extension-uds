@@ -10,7 +10,7 @@ dependencies = [
     "zelos-sdk>=0.0.13",
     "rich-click>=1.8.0",
     # The extras bring python-can and can-isotp, which the code imports directly, and doipclient for `zelos_can.doip`.
-    "zelos-can[python-can,diag]>=0.0.11a16",
+    "zelos-can[python-can,diag]>=0.0.11a22",
     "udsoncan>=1.21.0",
 ]
 
