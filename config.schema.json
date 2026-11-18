@@ -74,7 +74,7 @@
                   "fd_mode": {
                     "type": "boolean",
                     "title": "CAN-FD Mode",
-                    "description": "Enable CAN-FD for higher data rates and larger payloads",
+                    "description": "Enable CAN-FD for higher data rates and larger payloads. Bitrates are set on the interface (ip link).",
                     "default": false,
                     "ui:widget": "toggle"
                   },
@@ -201,13 +201,13 @@
                   "ssh_extra_opts": {
                     "type": "string",
                     "title": "SSH Extra Options",
-                    "description": "Additional ssh command-line options, space-separated (e.g. -J bastion). Placed before the options above; ssh honors the first -o it sees, so these win over the settings above."
+                    "description": "Additional ssh command-line options, space-separated (e.g. -J bastion). Placed before the options above; ssh honours the first -o it sees, so these win over the settings above."
                   },
                   "ssh_hw_timestamps": {
                     "type": "boolean",
                     "title": "Hardware timestamps",
-                    "description": "Uses the adapter's hardware clock when the edge's candump supports -H; interfaces without one (vcan, some slcan) fall back to the extension's wall clock. Turn off to use the edge kernel's receive time.",
-                    "default": true,
+                    "description": "Off: frames carry the edge kernel's receive time, which follows the edge's system clock. On: the adapter's hardware clock, where the edge's candump supports -H. Frame spacing is tighter, but that clock runs free of the system clock and drifts from wall time over a long capture; interfaces without one (vcan, some slcan) fall back to the extension's wall clock.",
+                    "default": false,
                     "ui:widget": "toggle"
                   },
                   "fd_mode": {
